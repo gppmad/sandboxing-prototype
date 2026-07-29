@@ -41,19 +41,44 @@ func main() {
 	}
 }
 
-// handleConn reads everything the client sends and writes it straight back,
-// which is exactly what an "echo" server does. It runs in its own goroutine.
-func handleConn(conn net.Conn) {
-	// Close the connection when we're done (i.e. when the client
-	// disconnects and io.Copy returns). This signals EOF to the peer.
-	defer conn.Close()
+// handleConn is where A2 diverges from A1. In A1 we echoed bytes back on the
+// SAME connection (server side only). Here we forward them to a real target.
+// It still runs in its own goroutine, one per accepted client.
+func handleConn(client net.Conn) {
+	// Close the client connection when we're done.
+	defer client.Close()
 
-	// io.Copy(dst, src) copies from src to dst until src hits EOF.
-	// Here dst and src are both conn, so every byte the client writes
-	// is read and immediately written back on the same connection.
-	// When the client closes its side, Read returns EOF, io.Copy
-	// returns, and the deferred conn.Close() fires.
-	if _, err := io.Copy(conn, conn); err != nil {
-		log.Printf("echo error: %v", err)
+	// ---- POINT 1: dial out (the CLIENT side of TCP) ----
+	//
+	// net.Dial is the active, client side of the handshake: WE reach out and
+	// open a connection TO example.com:80. Contrast with main(), which uses
+	// net.Listen + Accept — the passive, server side, where we wait for others
+	// to reach out to US.
+	//
+	// So this one program now holds TWO sockets per connection:
+	//   - `client`: we are the SERVER of it (it came in via Accept)
+	//   - `target`: we are the CLIENT of it (we opened it via Dial)
+	target, err := net.Dial("tcp", "example.com:80")
+	if err != nil {
+		// If we can't reach the target, this client can't be served. Log and
+		// return; the deferred client.Close() drops the client connection.
+		log.Printf("dial error: %v", err)
+		return
 	}
+	// Close the target connection too when we're done.
+	defer target.Close()
+
+	// ---- Minimal relay so point 1 is testable RIGHT NOW ----
+	//
+	// This inline two-way copy is deliberately quick-and-dirty. Turning it into
+	// a reusable, properly-synchronized `pipe(a, b io.ReadWriteCloser)` helper
+	// is POINT 2 — not done here on purpose so we can see point 1 in isolation.
+	//
+	// One direction runs in a goroutine (client -> target); the other runs
+	// inline (target -> client). When example.com finishes its HTTP/1.0
+	// response it closes, io.Copy below returns, handleConn returns, and the
+	// deferred Close() calls tear down both sockets — which unblocks the
+	// goroutine's copy as well.
+	go io.Copy(target, client) // client's request bytes -> target
+	io.Copy(client, target)    // target's response bytes -> client
 }
