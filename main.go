@@ -7,53 +7,57 @@ import (
 	"net"
 )
 
+// targetAddr is the fixed destination every accepted connection is forwarded to.
+const targetAddr = "example.com:80"
+
 func main() {
-	// Ask the OS for a TCP listener bound to all interfaces on port 9001.
-	// ":9001" means ":<port>" — the empty host binds to 0.0.0.0 (IPv4) and [::] (IPv6).
+	// The empty host in ":9001" binds all interfaces — 0.0.0.0 and [::].
 	ln, err := net.Listen("tcp", ":9001")
 	if err != nil {
-		// log.Fatalf prints the error and exits the process (non-zero status).
-		// We can't run a server if we can't listen, so this is fatal.
 		log.Fatalf("failed to listen: %v", err)
 	}
-	// Ensure the listener is closed when main returns. Even though the
-	// accept loop below runs forever, this keeps things tidy if we ever
-	// add a shutdown path later.
 	defer ln.Close()
 
-	fmt.Println("listening on :9001")
+	fmt.Printf("listening on :9001, forwarding to %s\n", targetAddr)
 
-	// The accept loop: block on ln.Accept() until a new client connects,
-	// then hand that connection off to a goroutine and immediately loop
-	// back to wait for the next one. This is what keeps the server
-	// running after a client disconnects — we never exit the loop.
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
-			// A single accept failure (e.g. too many open files) shouldn't
-			// kill the whole server. Log it and try again.
+			// One failed accept (e.g. too many open files) shouldn't kill
+			// the server.
 			log.Printf("accept error: %v", err)
 			continue
 		}
-		// One goroutine per connection so many clients can be served
-		// concurrently without blocking each other.
-		go handleConn(conn)
+		// One goroutine per connection so clients don't block each other.
+		go handleConn(conn, targetAddr)
 	}
 }
 
-// handleConn reads everything the client sends and writes it straight back,
-// which is exactly what an "echo" server does. It runs in its own goroutine.
-func handleConn(conn net.Conn) {
-	// Close the connection when we're done (i.e. when the client
-	// disconnects and io.Copy returns). This signals EOF to the peer.
-	defer conn.Close()
+// handleConn relays traffic between client and addr, so the client is
+// transparently talking to whatever is on the other end.
+func handleConn(client net.Conn, addr string) {
+	defer client.Close()
 
-	// io.Copy(dst, src) copies from src to dst until src hits EOF.
-	// Here dst and src are both conn, so every byte the client writes
-	// is read and immediately written back on the same connection.
-	// When the client closes its side, Read returns EOF, io.Copy
-	// returns, and the deferred conn.Close() fires.
-	if _, err := io.Copy(conn, conn); err != nil {
-		log.Printf("echo error: %v", err)
+	target, err := net.Dial("tcp", addr)
+	if err != nil {
+		log.Printf("dial %s: %v", addr, err)
+		return
 	}
+	defer target.Close()
+
+	// A connection is full-duplex — two independent streams — so relaying
+	// it takes two copies running at once. Both report into the same
+	// channel so we return as soon as either direction ends; the deferred
+	// Closes then unblock the other copy's pending Read.
+	done := make(chan struct{}, 2)
+	go func() {
+		io.Copy(client, target) // target -> client
+		done <- struct{}{}
+	}()
+	go func() {
+		io.Copy(target, client) // client -> target
+		done <- struct{}{}
+	}()
+
+	<-done
 }
