@@ -2,9 +2,10 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"net"
+
+	"github.com/gppmad/sandboxing-prototype/internal/relay"
 )
 
 // targetAddr is the fixed destination every accepted connection is forwarded to.
@@ -45,19 +46,7 @@ func handleConn(client net.Conn, addr string) {
 	}
 	defer target.Close()
 
-	// A connection is full-duplex — two independent streams — so relaying
-	// it takes two copies running at once. Both report into the same
-	// channel so we return as soon as either direction ends; the deferred
-	// Closes then unblock the other copy's pending Read.
-	done := make(chan struct{}, 2)
-	go func() {
-		io.Copy(client, target) // target -> client
-		done <- struct{}{}
-	}()
-	go func() {
-		io.Copy(target, client) // client -> target
-		done <- struct{}{}
-	}()
-
-	<-done
+	// Returns once either direction ends; the deferred Closes above then
+	// unblock the copy still waiting on a Read.
+	relay.Pipe(client, target)
 }
