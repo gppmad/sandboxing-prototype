@@ -1,0 +1,396 @@
+<title>Who closes a TCP connection — sandboxing-prototype, lesson 1</title>
+<style>
+:root {
+  --bg:#E6E9EE; --bg2:#F1F4F7; --panel:#FBFCFD;
+  --fg:#161B23; --soft:#47505E; --muted:#6B7583;
+  --line:#C4CBD6; --line-lt:#DCE2EA;
+  --out:#1F3FC4; --in:#A2571C; --alarm:#A8322A; --ok:#1D6A55;
+  --out-w:rgba(31,63,196,.09); --alarm-w:rgba(168,50,42,.09); --ok-w:rgba(29,106,85,.09);
+  --serif:Charter,"Iowan Old Style","Source Serif 4",Georgia,serif;
+  --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#0E1116; --bg2:#151A22; --panel:#1A202A;
+  --fg:#E3E8EF; --soft:#AFB9C6; --muted:#7C8794;
+  --line:#2C3543; --line-lt:#222A35;
+  --out:#7B95FF; --in:#E2953F; --alarm:#E2695C; --ok:#4FBF97;
+  --out-w:rgba(123,149,255,.13); --alarm-w:rgba(226,105,92,.13); --ok-w:rgba(79,191,151,.13);
+}}
+:root[data-theme="dark"]{
+  --bg:#0E1116; --bg2:#151A22; --panel:#1A202A;
+  --fg:#E3E8EF; --soft:#AFB9C6; --muted:#7C8794;
+  --line:#2C3543; --line-lt:#222A35;
+  --out:#7B95FF; --in:#E2953F; --alarm:#E2695C; --ok:#4FBF97;
+  --out-w:rgba(123,149,255,.13); --alarm-w:rgba(226,105,92,.13); --ok-w:rgba(79,191,151,.13);
+}
+:root[data-theme="light"]{
+  --bg:#E6E9EE; --bg2:#F1F4F7; --panel:#FBFCFD;
+  --fg:#161B23; --soft:#47505E; --muted:#6B7583;
+  --line:#C4CBD6; --line-lt:#DCE2EA;
+  --out:#1F3FC4; --in:#A2571C; --alarm:#A8322A; --ok:#1D6A55;
+  --out-w:rgba(31,63,196,.09); --alarm-w:rgba(168,50,42,.09); --ok-w:rgba(29,106,85,.09);
+}
+
+body { background:var(--bg); color:var(--fg); font-family:var(--serif); font-size:17px; line-height:1.62; -webkit-font-smoothing:antialiased; }
+.page { max-width:min(68ch, 100% - 2.5rem); margin-inline:auto; padding:3.25rem 0 5rem; display:grid; gap:.95rem; }
+
+h1,h2 { line-height:1.17; font-weight:600; margin:0; text-wrap:balance; }
+h1 { font-size:clamp(1.95rem,5vw,2.7rem); letter-spacing:-.018em; }
+h2 { font-size:clamp(1.24rem,2.8vw,1.48rem); letter-spacing:-.011em; margin-top:2rem; padding-top:.9rem; border-top:1px solid var(--line); }
+h2 .n { font-family:var(--mono); font-size:.62em; color:var(--muted); letter-spacing:.1em; margin-right:.6em; vertical-align:.16em; }
+p { margin:0; }
+.eyebrow { font-family:var(--mono); font-size:.68rem; letter-spacing:.17em; text-transform:uppercase; color:var(--muted); }
+.lede { font-size:1.12rem; color:var(--soft); }
+
+code { font-family:var(--mono); font-size:.855em; background:var(--bg2); border:1px solid var(--line-lt); border-radius:3px; padding:.08em .32em; white-space:nowrap; }
+pre { font-family:var(--mono); font-size:12.5px; line-height:1.6; background:var(--bg2); border:1px solid var(--line); border-left:2px solid var(--line); border-radius:0 3px 3px 0; padding:.75rem .85rem; margin:0; overflow-x:auto; }
+pre code { all:unset; font-family:var(--mono); }
+.k{color:var(--out)} .s{color:var(--in)} .c{color:var(--muted)} .hot{color:var(--alarm);font-weight:600}
+
+.box { border:1px solid var(--line); border-left:3px solid var(--out); border-radius:0 4px 4px 0; background:var(--bg2); padding:.9rem 1.05rem; display:grid; gap:.55rem; }
+.box--warn { border-left-color:var(--alarm); background:var(--alarm-w); }
+.box--ok   { border-left-color:var(--ok);    background:var(--ok-w); }
+.box--flat { border-left-color:var(--muted); }
+.box__t { font-family:var(--mono); font-size:.65rem; letter-spacing:.14em; text-transform:uppercase; color:var(--out); }
+.box--warn .box__t{color:var(--alarm)} .box--ok .box__t{color:var(--ok)} .box--flat .box__t{color:var(--muted)}
+.box pre { background:var(--panel); }
+.quote { font-style:italic; color:var(--soft); }
+
+figure { margin:.4rem 0 0; border:1px solid var(--line); border-radius:5px; background:var(--panel); overflow:hidden; }
+.fb { padding:.85rem; overflow-x:auto; }
+figure svg { display:block; width:100%; height:auto; }
+figcaption { font-size:.88rem; color:var(--soft); padding:.65rem .9rem .8rem; border-top:1px solid var(--line-lt); background:var(--bg2); }
+figcaption b { font-family:var(--mono); font-size:.7rem; letter-spacing:.1em; text-transform:uppercase; color:var(--fg); font-weight:400; margin-right:.45em; }
+
+.bx { fill:var(--panel); stroke:var(--soft); stroke-width:1; }
+.bxf { fill:var(--bg2); stroke:var(--line); stroke-width:1; }
+.l { font-family:var(--mono); font-size:9px; fill:var(--fg); }
+.sm { font-family:var(--mono); font-size:8px; fill:var(--muted); }
+.cp { font-family:var(--mono); font-size:7.5px; fill:var(--muted); letter-spacing:.13em; }
+.o{fill:var(--out)} .i{fill:var(--in)} .a{fill:var(--alarm)}
+.ao{fill:none;stroke:var(--out);stroke-width:1.4} .ai{fill:none;stroke:var(--in);stroke-width:1.4}
+.aa{fill:none;stroke:var(--alarm);stroke-width:1.4} .ak{fill:none;stroke:var(--muted);stroke-width:1;stroke-dasharray:3 2.5}
+.life { stroke:var(--line); stroke-width:1; }
+.band { fill:var(--alarm-w); stroke:var(--alarm); stroke-width:.75; stroke-dasharray:3 2.5; }
+
+details { border:1px solid var(--line); border-radius:5px; background:var(--panel); overflow:hidden; }
+summary { cursor:pointer; padding:.8rem 1rem; display:grid; grid-template-columns:1.7rem 1fr auto; gap:.5rem; align-items:start; list-style:none; }
+summary::-webkit-details-marker { display:none; }
+summary:focus-visible { outline:2px solid var(--out); outline-offset:-3px; }
+.qn { font-family:var(--mono); font-size:.7rem; color:var(--out); padding-top:.2rem; }
+.qh { font-family:var(--mono); font-size:.58rem; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); padding-top:.3rem; }
+details[open] .qh { color:var(--out); }
+.qa { padding:.8rem 1rem .95rem 3.2rem; border-top:1px solid var(--line-lt); color:var(--soft); font-size:.95rem; display:grid; gap:.55rem; }
+.qa strong { color:var(--fg); }
+
+.vs { display:grid; grid-template-columns:1fr 1fr; gap:1px; background:var(--line); border:1px solid var(--line); border-radius:5px; overflow:hidden; }
+@media (max-width:640px){ .vs{grid-template-columns:1fr} }
+.vs > div { padding:.75rem .85rem; display:grid; gap:.45rem; align-content:start; }
+.vs > div:first-child { background:var(--alarm-w); }
+.vs > div:last-child { background:var(--ok-w); }
+.vs__t { font-family:var(--mono); font-size:.62rem; letter-spacing:.12em; text-transform:uppercase; }
+.vs > div:first-child .vs__t { color:var(--alarm); }
+.vs > div:last-child .vs__t { color:var(--ok); }
+.vs pre { background:var(--panel); font-size:11.5px; border-left-width:1px; }
+
+.predict { border:1px solid var(--alarm); border-radius:5px; overflow:hidden; }
+.ph { font-family:var(--mono); font-size:.65rem; letter-spacing:.13em; text-transform:uppercase; color:var(--alarm); background:var(--alarm-w); padding:.65rem 1rem; border-bottom:1px solid var(--line); }
+.pb2 { padding:.95rem 1rem; background:var(--panel); display:grid; gap:.7rem; }
+.slot { display:grid; gap:.3rem; }
+.slot__t { font-family:var(--mono); font-size:.67rem; color:var(--alarm); }
+textarea { width:100%; box-sizing:border-box; font-family:var(--mono); font-size:12.5px; line-height:1.55; padding:.5rem .65rem; background:var(--bg2); color:var(--fg); border:1px solid var(--line); border-radius:3px; resize:vertical; min-height:2.9rem; }
+textarea:focus-visible { outline:2px solid var(--out); outline-offset:1px; border-color:var(--out); }
+.btn { font-family:var(--mono); font-size:.69rem; padding:.42rem .8rem; border:1px solid var(--alarm); border-radius:3px; background:var(--alarm); color:var(--panel); cursor:pointer; justify-self:start; }
+.btn:hover { filter:brightness(1.08); }
+.btn:focus-visible { outline:2px solid var(--out); outline-offset:2px; }
+.btn[disabled] { opacity:.45; cursor:default; }
+#ans[hidden] { display:none; }
+
+ol,ul { margin:0; padding-left:1.3rem; display:grid; gap:.4rem; }
+li::marker { color:var(--muted); }
+.recap { border:1.5px solid var(--fg); border-radius:5px; padding:1rem 1.15rem; display:grid; gap:.65rem; }
+.recap__t { font-family:var(--mono); font-size:.66rem; letter-spacing:.14em; text-transform:uppercase; }
+footer { margin-top:2rem; padding-top:.9rem; border-top:1px solid var(--line); font-family:var(--mono); font-size:.68rem; color:var(--muted); display:flex; flex-wrap:wrap; gap:.35rem 1.2rem; justify-content:space-between; }
+@media (prefers-reduced-motion:reduce){ *{transition-duration:.001ms!important} }
+</style>
+
+<div class="page">
+
+  <p class="eyebrow">sandboxing-prototype · lesson 1</p>
+  <h1>Who closes a TCP connection</h1>
+  <p class="lede">Why the client's <code>Close()</code> and your <code>client.Close()</code> are two different events.</p>
+
+  <div class="box box--flat">
+    <div class="box__t">Your question, and the verdict</div>
+    <p class="quote">“We call <code>client.Close()</code>, which I guess is called once the caller on their side closes the connection — meaning they trigger a FIN packet.”</p>
+    <p><strong>The FIN half is right.</strong> Their <code>Close()</code> makes their kernel send a FIN, and that FIN is the only thing that crosses the wire.</p>
+    <p><strong>The missing link is “called”.</strong> Nothing about their FIN calls your <code>Close()</code> — no callback, no event, no notification. Their FIN does exactly one thing to your process: <strong>a parked <code>Read</code> returns <code>io.EOF</code></strong>. Your code then returns, and the deferred <code>client.Close()</code> fires because of <em>that</em>. It is <strong>your half of the close</strong>, and the connection isn't finished until you send it.</p>
+  </div>
+
+  <h2><span class="n">01</span>The code, reduced as far as it goes</h2>
+  <p>One connection, echo the bytes back. Two lines carry the whole lesson.</p>
+
+<pre><span class="k">func</span> handleConn(client net.Conn) {
+	<span class="k">defer</span> client.Close()           <span class="hot">// ← runs when this function RETURNS</span>
+
+	buf := <span class="k">make</span>([]<span class="k">byte</span>, 4096)
+	<span class="k">for</span> {
+		n, err := client.Read(buf)    <span class="hot">// ← the goroutine sleeps HERE</span>
+		<span class="k">if</span> err != <span class="k">nil</span> {             <span class="c">// io.EOF lands right here</span>
+			<span class="k">return</span>                    <span class="hot">// ← and THIS triggers Close()</span>
+		}
+		client.Write(buf[:n])         <span class="c">// echo it back</span>
+	}
+}</pre>
+
+  <p>The goroutine spends its entire life asleep in <code>client.Read(buf)</code>. <code>defer client.Close()</code> is wired to <code>return</code> — not to the client. And the connection it holds is <strong>two independent byte streams on one descriptor</strong>, with separate lifetimes: either side can stop sending while the other keeps going.</p>
+
+  <h2><span class="n">02</span>The wire that does not exist</h2>
+
+  <figure>
+    <div class="fb">
+      <svg viewBox="0 0 700 200" style="min-width:600px" role="img" aria-label="The imagined direct link versus the four real events">
+        <text class="cp a" x="0" y="10">A · THE MODEL THAT FEELS RIGHT</text>
+        <rect class="bxf" x="4" y="20" width="150" height="42" rx="3" />
+        <text class="l" x="16" y="38">client calls</text>
+        <text class="l" x="16" y="52">Close()</text>
+        <rect class="bxf" x="410" y="20" width="180" height="42" rx="3" />
+        <text class="l" x="422" y="38">our client.Close()</text>
+        <text class="l" x="422" y="52">is called</text>
+        <path class="ak" d="M158 41 H402" marker-end="url(#mk)" />
+        <line x1="252" y1="24" x2="308" y2="58" stroke="currentColor" style="color:var(--alarm)" stroke-width="2" />
+        <line x1="308" y1="24" x2="252" y2="58" stroke="currentColor" style="color:var(--alarm)" stroke-width="2" />
+        <text class="l a" x="600" y="38">no such</text>
+        <text class="l a" x="600" y="52">wire exists</text>
+
+        <text class="cp o" x="0" y="92">B · WHAT ACTUALLY HAPPENS · FOUR SEPARATE EVENTS</text>
+        <rect class="bx" x="4"   y="102" width="120" height="52" rx="3" />
+        <text class="sm"  x="14" y="118">1 · their side</text>
+        <text class="l"   x="14" y="134">Close()</text>
+        <text class="sm"  x="14" y="148">kernel sends FIN</text>
+        <rect class="bx" x="152" y="102" width="140" height="52" rx="3" />
+        <text class="sm"  x="162" y="118">2 · your kernel</text>
+        <text class="l"   x="162" y="134">ACKs it, marks</text>
+        <text class="l"   x="162" y="148">read side done</text>
+        <rect class="bx" x="320" y="102" width="150" height="52" rx="3" />
+        <text class="sm"  x="330" y="118">3 · your code</text>
+        <text class="l"   x="330" y="134">Read returns</text>
+        <text class="l a" x="330" y="148">0, io.EOF</text>
+        <rect class="bx" x="498" y="102" width="198" height="52" rx="3" />
+        <text class="sm"  x="508" y="118">4 · your code</text>
+        <text class="l"   x="508" y="134">return → deferred</text>
+        <text class="l a" x="508" y="148">client.Close() → your FIN</text>
+        <path class="ao" d="M128 128 H146" marker-end="url(#mo2)" />
+        <path class="ao" d="M296 128 H314" marker-end="url(#mo2)" />
+        <path class="ao" d="M474 128 H492" marker-end="url(#mo2)" />
+        <rect class="band" x="320" y="166" width="150" height="24" rx="2" />
+        <text class="sm a" x="330" y="182">the only notification</text>
+        <text class="sm" x="486" y="182">…and the only reason step 4 ever runs.</text>
+        <defs>
+          <marker id="mk" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="currentColor" style="color:var(--muted)"/></marker>
+          <marker id="mo2" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="currentColor" style="color:var(--out)"/></marker>
+        </defs>
+      </svg>
+    </div>
+    <figcaption><b>Fig 1</b> Steps 1 and 2 are invisible to you. Step 3 is the entire notification you get — and if your code is not sitting in a <code>Read</code>, you never find out at all.</figcaption>
+  </figure>
+
+  <div class="vs">
+    <div>
+      <div class="vs__t">the API your model implies</div>
+<pre>conn.OnPeerClose(<span class="k">func</span>() {
+    conn.Close()
+})</pre>
+    </div>
+    <div>
+      <div class="vs__t">the API Go actually gives you</div>
+<pre>n, err := conn.Read(buf)
+<span class="k">if</span> err == io.EOF { <span class="c">/* … */</span> }</pre>
+    </div>
+  </div>
+  <p>Left column: you'd hear about the close whether or not you were reading, and forgetting <code>Close()</code> would be impossible. Right column: you only hear about it <em>as the result of a read you chose to make</em>, and cleanup is yours to forget.</p>
+
+  <h2><span class="n">03</span>The whole thing on one timeline</h2>
+  <p>A close is <strong>two FINs, one per direction</strong> — the four-way handshake. The right column is your Go code, lined up against the packets.</p>
+
+  <figure>
+    <div class="fb">
+      <svg viewBox="0 0 700 366" style="min-width:640px" role="img" aria-label="Sequence diagram of the four-way TCP close, annotated with the Go code at each step">
+        <text class="cp" x="4" y="10">CLIENT</text>
+        <text class="cp" x="344" y="10">FORWARDER</text>
+        <text class="cp" x="442" y="10">YOUR GO CODE, AT THAT MOMENT</text>
+        <line class="life" x1="120" y1="18" x2="120" y2="352" />
+        <line class="life" x1="330" y1="18" x2="330" y2="352" />
+        <line class="life" x1="432" y1="4" x2="432" y2="358" />
+
+        <rect class="band" x="325" y="146" width="10" height="124" />
+        <line x1="341" y1="146" x2="341" y2="270" stroke="currentColor" style="color:var(--alarm)" stroke-width=".75" />
+        <line x1="341" y1="146" x2="347" y2="146" stroke="currentColor" style="color:var(--alarm)" stroke-width=".75" />
+        <line x1="341" y1="270" x2="347" y2="270" stroke="currentColor" style="color:var(--alarm)" stroke-width=".75" />
+
+        <text class="sm" x="4" y="34">ESTABLISHED</text>
+        <text class="sm" x="344" y="34">ESTABLISHED</text>
+        <text class="sm" x="442" y="34">parked in client.Read(buf)</text>
+
+        <path class="ao" d="M122 62 H326" marker-end="url(#so)" />
+        <text class="l o" x="146" y="56">"hello" · 5 bytes</text>
+        <text class="sm" x="442" y="58">Read returns 5, nil</text>
+        <text class="sm" x="442" y="70">Write(buf[:5])</text>
+
+        <path class="ai" d="M328 94 H124" marker-end="url(#si)" />
+        <text class="l i" x="146" y="88">"hello" · echoed back</text>
+        <text class="sm" x="442" y="92">loop · parks in Read again</text>
+
+        <text class="l a" x="4" y="124">client.Close()</text>
+        <text class="sm" x="4" y="136">FIN_WAIT_1</text>
+        <path class="aa" d="M122 148 H326" marker-end="url(#sa)" />
+        <text class="l a" x="146" y="142">FIN</text>
+        <text class="sm" x="442" y="146">Read returns 0, io.EOF</text>
+        <text class="sm a" x="442" y="158">the only thing you are told</text>
+        <text class="sm a" x="352" y="150">CLOSE_WAIT</text>
+
+        <path class="ak" d="M328 180 H124" marker-end="url(#sk)" />
+        <text class="sm" x="146" y="174">ACK · your kernel, automatic</text>
+        <text class="sm" x="4" y="196">FIN_WAIT_2</text>
+        <text class="sm" x="442" y="184">your code plays no part in this ACK</text>
+
+        <text class="sm a" x="352" y="200">your code's</text>
+        <text class="sm a" x="352" y="212">decision</text>
+        <text class="sm a" x="352" y="224">window</text>
+        <text class="sm" x="442" y="216">if err != nil {</text>
+        <text class="sm" x="442" y="228">    return      ← the decision</text>
+        <text class="sm" x="442" y="240">}</text>
+        <text class="sm" x="442" y="258">deferred client.Close() runs</text>
+
+        <path class="aa" d="M328 288 H124" marker-end="url(#sa2)" />
+        <text class="l a" x="146" y="282">FIN · yours</text>
+        <text class="sm a" x="352" y="292">LAST_ACK</text>
+        <text class="sm" x="442" y="286">Close() = send FIN + release the fd</text>
+
+        <path class="ak" d="M122 320 H326" marker-end="url(#sk2)" />
+        <text class="sm" x="146" y="314">ACK</text>
+        <text class="sm" x="4" y="340">TIME_WAIT · 2×MSL</text>
+        <text class="sm" x="344" y="340">CLOSED</text>
+        <text class="sm" x="442" y="318">goroutine exits · fd is gone</text>
+
+        <defs>
+          <marker id="so"  viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="currentColor" style="color:var(--out)"/></marker>
+          <marker id="si"  viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="currentColor" style="color:var(--in)"/></marker>
+          <marker id="sa"  viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="currentColor" style="color:var(--alarm)"/></marker>
+          <marker id="sa2" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="currentColor" style="color:var(--alarm)"/></marker>
+          <marker id="sk"  viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="currentColor" style="color:var(--muted)"/></marker>
+          <marker id="sk2" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="currentColor" style="color:var(--muted)"/></marker>
+        </defs>
+      </svg>
+    </div>
+    <figcaption><b>Fig 2</b> The shaded band is <code>CLOSE_WAIT</code> — the client is finished, you are not yet. Its length is a property of <em>your program</em>, not the network. Note too that whoever closes <em>first</em> pays the <code>TIME_WAIT</code> cost: here, the client.</figcaption>
+  </figure>
+
+  <div class="box box--warn">
+    <div class="box__t">CLOSE_WAIT is the proof</div>
+    <p>Delete <code>defer client.Close()</code> and nothing appears to break — the client got its echo and hung up happily. But your socket stays in <code>CLOSE_WAIT</code> <strong>forever</strong>. That state means precisely “the peer is finished and the local application has not called close,” so the kernel cannot clean it up; only you know whether you still want to write.</p>
+<pre>$ netstat -an | grep 9001
+tcp4  0  0  127.0.0.1.9001  127.0.0.1.54321  <span class="hot">CLOSE_WAIT</span>   <span class="c">← one leaked fd, forever</span></pre>
+    <p>Accumulate those and you get <code>too many open files</code> — the error your accept loop's <code>continue</code> was written to survive. If their <code>Close()</code> really did trigger yours, this bug could not exist.</p>
+  </div>
+
+  <h2><span class="n">04</span>Check yourself</h2>
+  <p>Answer all three out loud before opening them.</p>
+
+  <details>
+    <summary><span class="qn">Q1</span><span>Exactly which line of <code>handleConn</code> does the client's FIN touch? Name it — and say what it does <em>not</em> touch.</span><span class="qh">reveal</span></summary>
+    <div class="qa">
+      <p><strong>Only <code>n, err := client.Read(buf)</code>.</strong> That is the whole blast radius. It does not touch <code>defer client.Close()</code>, or the <code>return</code>, or <code>ln.Accept()</code> in <code>main</code>, and it does not interrupt or signal the goroutine.</p>
+      <p>The FIN's entire effect on your program is turning one blocked function call into <code>0, io.EOF</code>. Everything downstream is your own control flow reacting to that value.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary><span class="qn">Q2</span><span>The client writes <code>"hello"</code> then calls <code>Close()</code> immediately, back to back. Does your echo still reach it — or does the FIN overtake the data?</span><span class="qh">reveal</span></summary>
+    <div class="qa">
+      <p><strong>The echo arrives.</strong> A FIN is not an interrupt or an out-of-band signal — it occupies a position in the byte stream, <em>after</em> the five bytes. TCP delivers in order, so your first <code>Read</code> returns <code>5, nil</code>, you echo, and only the <strong>next</strong> <code>Read</code> returns <code>0, io.EOF</code>.</p>
+      <p>The corollary matters more than the answer: <strong>EOF means “you have consumed everything they sent,”</strong> not “they closed a while ago.” A close can never overtake data in flight.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary><span class="qn">Q3</span><span>Where in Fig 2 would <code>CLOSE_WAIT</code> last forever, and what single line makes the difference?</span><span class="qh">reveal</span></summary>
+    <div class="qa">
+      <p>The shaded band never ends. It closes only when <code>defer client.Close()</code> runs, so deleting that line leaves the band open for the life of the process — with the fd still charged to you, and no Go code left watching it, since the goroutine has already returned.</p>
+      <p>That is the asymmetry to keep: the band's <em>start</em> is their decision, its <em>end</em> is yours.</p>
+    </div>
+  </details>
+
+  <h2><span class="n">05</span>Predict first</h2>
+  <p>A client connects, sends nothing, never closes. Your goroutine is parked in <code>client.Read(buf)</code>. For each ending: <strong>what does <code>Read</code> return, and how long does it take?</strong> Are any two identical from your program's point of view?</p>
+
+  <div class="predict">
+    <div class="ph">Write it down before you reveal</div>
+    <div class="pb2">
+      <div class="slot">
+        <span class="slot__t">1 · client calls Close() and exits cleanly</span>
+        <textarea aria-label="Prediction for ending 1"></textarea>
+      </div>
+      <div class="slot">
+        <span class="slot__t">2 · kill -9, no cleanup code runs</span>
+        <textarea aria-label="Prediction for ending 2"></textarea>
+      </div>
+      <div class="slot">
+        <span class="slot__t">3 · power cut / cable pulled</span>
+        <textarea aria-label="Prediction for ending 3"></textarea>
+      </div>
+      <button class="btn" id="btn">I've written all three — reveal</button>
+
+      <div id="ans" hidden>
+        <div class="box box--ok">
+          <div class="box__t">Answer</div>
+          <p><strong>1 and 2 are identical</strong> — both return <code>0, io.EOF</code> in under a millisecond. <strong>The FIN is sent by the kernel, not by the client's cleanup code.</strong> When a process dies, cleanly or by <code>SIGKILL</code>, the kernel closes every descriptor it held, and closing a TCP socket sends a FIN. <code>kill -9</code> skips the client's defers; it does not skip the OS. You cannot distinguish a polite goodbye from a murdered process.</p>
+          <p><strong>3 is completely different: your <code>Read</code> parks indefinitely.</strong> A dead host sends nothing — no FIN, no RST, no error. From your side it looks exactly like a healthy client that has gone quiet, because that is precisely what it looks like on the wire. The socket stays <code>ESTABLISHED</code> and the goroutine and fd stay charged to you.</p>
+          <p>Two fixes, and you must pick one deliberately: <strong>a read deadline</strong> (<code>SetReadDeadline</code>, refreshed on every successful read — an idle timeout), or <strong>TCP keepalives</strong>, which make the kernel probe a silent peer and eventually fail the connection for you. Neither is on by default in a way you should rely on. This is the next lesson.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2><span class="n">06</span>Verify it yourself</h2>
+  <p>Two minutes, three terminals. Seeing <code>CLOSE_WAIT</code> appear and vanish is what makes the distinction stick.</p>
+
+<pre>$ go build -o fwd . &amp;&amp; ./fwd                                  <span class="c"># terminal 1</span>
+$ nc localhost 9001                                           <span class="c"># terminal 2 — type, then ^D</span>
+$ <span class="k">while</span> :; <span class="k">do</span> clear; netstat -an | grep 9001; sleep 0.5; <span class="k">done</span>   <span class="c"># terminal 3</span></pre>
+
+  <div class="box box--ok">
+    <div class="box__t">Run it twice</div>
+    <p><strong>As written:</strong> press <code>^D</code> and you will probably never catch <code>CLOSE_WAIT</code> at all — the deferred <code>Close()</code> fires microseconds after the EOF. The band in Fig 2 is real but vanishingly thin.</p>
+    <p><strong>With <code>defer client.Close()</code> commented out:</strong> the <code>CLOSE_WAIT</code> line never disappears. Reconnect a few times and count them with <code>lsof -p $(pgrep fwd) | grep TCP</code>. That climbing number is this whole lesson made visible — the client behaved perfectly, and the leak is still entirely yours.</p>
+  </div>
+
+  <div class="recap">
+    <div class="recap__t">What to carry forward</div>
+    <ol>
+      <li><strong>A connection is two directions with separate lifetimes.</strong> Closing is two events — two FINs — not one.</li>
+      <li><strong>A peer's close reaches you as exactly one thing: <code>io.EOF</code> from a read you were already making.</strong></li>
+      <li><strong><code>client.Close()</code> is your own half of the close</strong>, triggered by your function returning. Skip it and the socket sits in <code>CLOSE_WAIT</code> holding an fd forever.</li>
+      <li><strong>FIN is in-band and ordered.</strong> EOF means “I have read everything they sent,” so a close never overtakes data in flight.</li>
+      <li><strong>Only three things end a parked <code>Read</code>:</strong> bytes arrive, a FIN arrives (<code>io.EOF</code>), or you close the descriptor locally (<code>net.ErrClosed</code>). A crashed peer produces none of them — which is why deadlines exist.</li>
+    </ol>
+  </div>
+
+  <footer>
+    <span>sandboxing-prototype · Theory/01</span>
+    <span>next: read deadlines, then the second connection</span>
+  </footer>
+</div>
+
+<script>
+document.getElementById("btn").addEventListener("click", function () {
+  var ans = document.getElementById("ans");
+  ans.hidden = false;
+  this.disabled = true;
+  this.textContent = "revealed";
+  ans.scrollIntoView({
+    behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+    block: "nearest"
+  });
+});
+</script>
