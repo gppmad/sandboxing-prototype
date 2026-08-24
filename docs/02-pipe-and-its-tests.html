@@ -1,0 +1,1303 @@
+<title>Testing relay.Pipe</title>
+<style>
+:root {
+  --bg:#E6E9EE; --bg2:#F1F4F7; --panel:#FBFCFD;
+  --fg:#161B23; --soft:#47505E; --muted:#6B7583;
+  --line:#C4CBD6; --line-lt:#DCE2EA;
+  --out:#1F3FC4; --in:#A2571C; --alarm:#A8322A; --ok:#1D6A55;
+  --out-w:rgba(31,63,196,.09); --in-w:rgba(162,87,28,.09);
+  --alarm-w:rgba(168,50,42,.09); --ok-w:rgba(29,106,85,.09);
+  --serif:Charter,"Iowan Old Style","Source Serif 4",Georgia,serif;
+  --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0E1116; --bg2:#151A22; --panel:#1A202A;
+  --fg:#E3E8EF; --soft:#AFB9C6; --muted:#7C8794;
+  --line:#2C3543; --line-lt:#222A35;
+  --out:#7B95FF; --in:#E2953F; --alarm:#E2695C; --ok:#4FBF97;
+  --out-w:rgba(123,149,255,.13); --in-w:rgba(226,149,63,.13);
+  --alarm-w:rgba(226,105,92,.13); --ok-w:rgba(79,191,151,.13);
+}}
+:root[data-theme="dark"]{
+  --bg:#0E1116; --bg2:#151A22; --panel:#1A202A;
+  --fg:#E3E8EF; --soft:#AFB9C6; --muted:#7C8794;
+  --line:#2C3543; --line-lt:#222A35;
+  --out:#7B95FF; --in:#E2953F; --alarm:#E2695C; --ok:#4FBF97;
+  --out-w:rgba(123,149,255,.13); --in-w:rgba(226,149,63,.13);
+  --alarm-w:rgba(226,105,92,.13); --ok-w:rgba(79,191,151,.13);
+}
+
+body { background:var(--bg); color:var(--fg); font-family:var(--serif); font-size:17px; line-height:1.62; -webkit-font-smoothing:antialiased; }
+.page { max-width:min(68ch, 100% - 2.5rem); margin-inline:auto; padding:3.25rem 0 5rem; display:grid; gap:.95rem; }
+
+h1,h2 { line-height:1.17; font-weight:600; margin:0; text-wrap:balance; }
+h1 { font-size:clamp(1.95rem,5vw,2.7rem); letter-spacing:-.018em; }
+h2 { font-size:clamp(1.24rem,2.8vw,1.48rem); letter-spacing:-.011em; margin-top:2rem; padding-top:.9rem; border-top:1px solid var(--line); }
+h2 .n { font-family:var(--mono); font-size:.62em; color:var(--muted); letter-spacing:.1em; margin-right:.6em; vertical-align:.16em; }
+h3 { font-family:var(--mono); font-size:.72rem; letter-spacing:.13em; text-transform:uppercase; color:var(--muted); font-weight:400; margin:.7rem 0 0; }
+p { margin:0; }
+.eyebrow { font-family:var(--mono); font-size:.68rem; letter-spacing:.17em; text-transform:uppercase; color:var(--muted); }
+.lede { font-size:1.12rem; color:var(--soft); }
+
+code { font-family:var(--mono); font-size:.855em; background:var(--bg2); border:1px solid var(--line-lt); border-radius:3px; padding:.08em .32em; white-space:nowrap; }
+pre { font-family:var(--mono); font-size:12.5px; line-height:1.6; background:var(--bg2); border:1px solid var(--line); border-left:2px solid var(--line); border-radius:0 3px 3px 0; padding:.75rem .85rem; margin:0; overflow-x:auto; }
+pre code { all:unset; font-family:var(--mono); }
+.k{color:var(--out)} .s{color:var(--in)} .c{color:var(--muted)} .hot{color:var(--alarm);font-weight:600} .gd{color:var(--ok);font-weight:600}
+
+.box { border:1px solid var(--line); border-left:3px solid var(--out); border-radius:0 4px 4px 0; background:var(--bg2); padding:.9rem 1.05rem; display:grid; gap:.55rem; }
+.box--warn { border-left-color:var(--alarm); background:var(--alarm-w); }
+.box--ok   { border-left-color:var(--ok);    background:var(--ok-w); }
+.box--flat { border-left-color:var(--muted); }
+.box__t { font-family:var(--mono); font-size:.65rem; letter-spacing:.14em; text-transform:uppercase; color:var(--out); }
+.box--warn .box__t{color:var(--alarm)} .box--ok .box__t{color:var(--ok)} .box--flat .box__t{color:var(--muted)}
+.box pre { background:var(--panel); }
+.quote { font-style:italic; color:var(--soft); }
+
+figure { margin:.4rem 0 0; border:1px solid var(--line); border-radius:5px; background:var(--panel); overflow:hidden; }
+.fb { padding:.85rem; overflow-x:auto; }
+figure svg { display:block; width:100%; height:auto; }
+figcaption { font-size:.88rem; color:var(--soft); padding:.65rem .9rem .8rem; border-top:1px solid var(--line-lt); background:var(--bg2); }
+figcaption b { font-family:var(--mono); font-size:.7rem; letter-spacing:.1em; text-transform:uppercase; color:var(--fg); font-weight:400; margin-right:.45em; }
+
+.bx { fill:var(--panel); stroke:var(--soft); stroke-width:1; }
+.bxf { fill:var(--bg2); stroke:var(--line); stroke-width:1; }
+.l { font-family:var(--mono); font-size:9px; fill:var(--fg); }
+.sm { font-family:var(--mono); font-size:8px; fill:var(--muted); }
+.cp { font-family:var(--mono); font-size:7.5px; fill:var(--muted); letter-spacing:.13em; }
+.o{fill:var(--out)} .i{fill:var(--in)} .a{fill:var(--alarm)} .g{fill:var(--ok)}
+.ao{fill:none;stroke:var(--out);stroke-width:1.4} .ai{fill:none;stroke:var(--in);stroke-width:1.4}
+.aa{fill:none;stroke:var(--alarm);stroke-width:1.4} .ak{fill:none;stroke:var(--muted);stroke-width:1;stroke-dasharray:3 2.5}
+.life { stroke:var(--line); stroke-width:1; }
+.band { fill:var(--alarm-w); stroke:var(--alarm); stroke-width:.75; stroke-dasharray:3 2.5; }
+
+details { border:1px solid var(--line); border-radius:5px; background:var(--panel); overflow:hidden; }
+summary { cursor:pointer; padding:.8rem 1rem; display:grid; grid-template-columns:1.7rem 1fr auto; gap:.5rem; align-items:start; list-style:none; }
+summary::-webkit-details-marker { display:none; }
+summary:focus-visible { outline:2px solid var(--out); outline-offset:-3px; }
+.qn { font-family:var(--mono); font-size:.7rem; color:var(--out); padding-top:.2rem; }
+.qh { font-family:var(--mono); font-size:.58rem; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); padding-top:.3rem; }
+details[open] .qh { color:var(--out); }
+.qa { padding:.8rem 1rem .95rem 3.2rem; border-top:1px solid var(--line-lt); color:var(--soft); font-size:.95rem; display:grid; gap:.55rem; }
+.qa strong { color:var(--fg); }
+.qa pre { font-size:11.5px; }
+
+.vs { display:grid; grid-template-columns:1fr 1fr; gap:1px; background:var(--line); border:1px solid var(--line); border-radius:5px; overflow:hidden; }
+@media (max-width:640px){ .vs{grid-template-columns:1fr} }
+.vs > div { padding:.75rem .85rem; display:grid; gap:.45rem; align-content:start; }
+.vs > div:first-child { background:var(--alarm-w); }
+.vs > div:last-child { background:var(--ok-w); }
+.vs__t { font-family:var(--mono); font-size:.62rem; letter-spacing:.12em; text-transform:uppercase; }
+.vs > div:first-child .vs__t { color:var(--alarm); }
+.vs > div:last-child .vs__t { color:var(--ok); }
+.vs pre { background:var(--panel); font-size:11.5px; border-left-width:1px; }
+.vs p { font-size:.92rem; color:var(--soft); }
+
+/* ---------- the lab ---------- */
+.lab { border:1px solid var(--line); border-radius:5px; background:var(--panel); overflow:hidden; margin-top:.4rem; }
+.lab__h { display:flex; flex-wrap:wrap; gap:.4rem .9rem; align-items:baseline; justify-content:space-between;
+          padding:.6rem .85rem; background:var(--bg2); border-bottom:1px solid var(--line); }
+.lab__t { font-family:var(--mono); font-size:.65rem; letter-spacing:.13em; text-transform:uppercase; color:var(--fg); }
+.lab__s { font-family:var(--mono); font-size:.65rem; color:var(--muted); }
+.lab__s.is-hung { color:var(--alarm); }
+.lab__s.is-ret { color:var(--ok); }
+
+/* the narration strip: says what just happened, in words */
+.narr { display:grid; grid-template-columns:auto 1fr; gap:.6rem; align-items:baseline;
+        padding:.65rem .85rem; border-bottom:1px solid var(--line); background:var(--panel); }
+.narr__k { font-family:var(--mono); font-size:.58rem; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); }
+.narr__b { font-size:.95rem; color:var(--fg); line-height:1.45; }
+.narr__b code { font-size:.8em; }
+.narr.is-block .narr__b { color:var(--alarm); }
+.narr.is-good  .narr__b { color:var(--ok); }
+
+.stage { padding:.9rem .85rem .3rem; overflow-x:auto; }
+.stage svg { display:block; width:100%; min-width:560px; height:auto; }
+
+/* highlight ring drawn around whichever element is being talked about */
+#focus { transition:opacity .25s ease, x .35s ease, y .35s ease, width .35s ease, height .35s ease; }
+@media (prefers-reduced-motion:reduce){ #focus{transition:none} }
+
+.ctrl { display:grid; grid-template-columns:1fr 1fr; gap:1px; background:var(--line); border-top:1px solid var(--line); }
+@media (max-width:600px){ .ctrl{grid-template-columns:1fr} }
+.ctrl > div { background:var(--panel); padding:.7rem .85rem; display:grid; gap:.45rem; align-content:start; }
+.ctrl__t { font-family:var(--mono); font-size:.62rem; letter-spacing:.1em; text-transform:uppercase; }
+.ctrl > div:nth-child(1) .ctrl__t { color:var(--out); }
+.ctrl > div:nth-child(2) .ctrl__t { color:var(--in); }
+.ctrl__n { font-size:.82rem; color:var(--muted); line-height:1.4; }
+.row { display:flex; flex-wrap:wrap; gap:.35rem; align-items:center; }
+
+button { font-family:var(--mono); font-size:.69rem; padding:.4rem .7rem; border:1px solid var(--line);
+         border-radius:3px; background:var(--bg2); color:var(--fg); cursor:pointer; }
+button:hover:not([disabled]) { border-color:var(--fg); }
+button:focus-visible { outline:2px solid var(--out); outline-offset:2px; }
+button[disabled] { opacity:.35; cursor:default; }
+button.pri { border-color:var(--out); color:var(--out); background:var(--out-w); }
+button.pri2 { border-color:var(--in); color:var(--in); background:var(--in-w); }
+button.dgr { border-color:var(--alarm); color:var(--alarm); background:var(--alarm-w); }
+button.on { background:var(--ok); border-color:var(--ok); color:var(--panel); }
+/* the "do this next" pulse — one suggested button at a time */
+button.hint { position:relative; box-shadow:0 0 0 0 var(--out); animation:pulse 2s ease-out infinite; }
+@keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(31,63,196,.45)} 70%{box-shadow:0 0 0 7px rgba(31,63,196,0)} 100%{box-shadow:0 0 0 0 rgba(31,63,196,0)} }
+@media (prefers-reduced-motion:reduce){ button.hint{animation:none; outline:2px dashed var(--out); outline-offset:2px} }
+.speed { display:flex; gap:.3rem; align-items:center; margin-left:auto; }
+.speed__l { font-family:var(--mono); font-size:.58rem; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); }
+
+.btn { font-family:var(--mono); font-size:.69rem; padding:.42rem .8rem; border:1px solid var(--alarm); border-radius:3px; background:var(--alarm); color:var(--panel); cursor:pointer; justify-self:start; }
+.btn:hover { filter:brightness(1.08); }
+.btn[disabled] { opacity:.45; cursor:default; }
+
+.logwrap { border-top:1px solid var(--line); background:var(--bg2); }
+.logh { font-family:var(--mono); font-size:.58rem; letter-spacing:.12em; text-transform:uppercase; color:var(--muted);
+        padding:.5rem .85rem .1rem; }
+.log { font-family:var(--mono); font-size:11.5px; line-height:1.75; padding:.35rem .85rem .6rem; margin:0;
+       max-height:11rem; overflow-y:auto; display:grid; gap:.05rem; }
+.log div { display:grid; grid-template-columns:2.4rem 1fr; gap:.6rem; }
+.log .t { color:var(--muted); font-variant-numeric:tabular-nums; }
+.log .m-o{color:var(--out)} .log .m-i{color:var(--in)} .log .m-a{color:var(--alarm)}
+.log .m-g{color:var(--ok)} .log .m-n{color:var(--soft)}
+.log .m-g, .log .m-a { font-weight:600; }
+
+.scen { display:flex; flex-wrap:wrap; gap:.35rem; padding:.7rem .85rem; border-top:1px solid var(--line); background:var(--bg2); align-items:center; }
+.scen span { font-family:var(--mono); font-size:.62rem; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); margin-right:.2rem; }
+
+.predict { border:1px solid var(--alarm); border-radius:5px; overflow:hidden; }
+.ph { font-family:var(--mono); font-size:.65rem; letter-spacing:.13em; text-transform:uppercase; color:var(--alarm); background:var(--alarm-w); padding:.65rem 1rem; border-bottom:1px solid var(--line); }
+.pb2 { padding:.95rem 1rem; background:var(--panel); display:grid; gap:.7rem; }
+.slot { display:grid; gap:.3rem; }
+.slot__t { font-family:var(--mono); font-size:.67rem; color:var(--alarm); }
+textarea { width:100%; box-sizing:border-box; font-family:var(--mono); font-size:12.5px; line-height:1.55; padding:.5rem .65rem; background:var(--bg2); color:var(--fg); border:1px solid var(--line); border-radius:3px; resize:vertical; min-height:2.9rem; }
+textarea:focus-visible { outline:2px solid var(--out); outline-offset:1px; border-color:var(--out); }
+#ans[hidden] { display:none; }
+
+ol,ul { margin:0; padding-left:1.3rem; display:grid; gap:.4rem; }
+li::marker { color:var(--muted); }
+.recap { border:1.5px solid var(--fg); border-radius:5px; padding:1rem 1.15rem; display:grid; gap:.65rem; }
+.recap__t { font-family:var(--mono); font-size:.66rem; letter-spacing:.14em; text-transform:uppercase; }
+footer { margin-top:2rem; padding-top:.9rem; border-top:1px solid var(--line); font-family:var(--mono); font-size:.68rem; color:var(--muted); display:flex; flex-wrap:wrap; gap:.35rem 1.2rem; justify-content:space-between; }
+@media (prefers-reduced-motion:reduce){ *{transition-duration:.001ms!important; animation-duration:.001ms!important} }
+</style>
+
+<div class="page">
+
+  <p class="eyebrow">sandboxing-prototype · lesson 2</p>
+  <h1>Testing <code style="all:unset;font-family:var(--mono);font-size:.72em">relay.Pipe</code></h1>
+  <p class="lede">Fourteen lines of production code, two tests, and one bug that only a test can catch: the whole function is about <em>which</em> of the two goroutines finishes first.</p>
+
+  <div class="box box--flat">
+    <div class="box__t">What you are looking at</div>
+    <p><code>Pipe</code> has no return value, no error, and no observable output. Its entire contract is about behaviour: <strong>bytes move</strong>, and <strong>it comes back</strong>. So there are exactly two tests, one per half of that sentence — and the second one is the interesting one, because the failure mode it guards against isn't a wrong answer, it's <em>no answer at all, forever</em>.</p>
+  </div>
+
+  <h2><span class="n">01</span>The function under test</h2>
+  <p>Strip the comments and it is short enough to read in one go. Read it as <strong>three</strong> facts, each of which one line of test exists to pin down.</p>
+
+<pre><span class="k">func</span> Pipe(a, b io.ReadWriteCloser) {
+	done := <span class="k">make</span>(<span class="k">chan struct</span>{}, <span class="s">2</span>)   <span class="c">// ← FACT 3: buffered, capacity 2</span>
+
+	<span class="k">go func</span>() {
+		io.Copy(a, b)                 <span class="c">// b -&gt; a  (dst, src)</span>
+		done &lt;- <span class="k">struct</span>{}{}
+	}()
+	<span class="k">go func</span>() {
+		io.Copy(b, a)                 <span class="c">// a -&gt; b  ← FACT 1: both directions</span>
+		done &lt;- <span class="k">struct</span>{}{}
+	}()
+
+	&lt;-done                            <span class="c">// ← FACT 2: ONE value. Not two.</span>
+}</pre>
+
+  <div class="vs">
+    <div>
+      <div class="vs__t">what it does not do</div>
+      <p>It never closes <code>a</code> or <code>b</code>. It never returns an error. It does not wait for both copies. It does not care whether <code>a</code> and <code>b</code> are sockets.</p>
+    </div>
+    <div>
+      <div class="vs__t">what it promises</div>
+      <p>While both ends live, bytes flow both ways. The moment <em>either</em> direction ends, the call returns — handing cleanup back to the caller.</p>
+    </div>
+  </div>
+
+  <p><code>io.Copy(dst, src)</code> is <strong>destination first</strong>. That argument order is the easiest thing to get the wrong way round here, and reversing it gives you a forwarder that echoes each side back to itself — which, notice, would still pass a test that only checked "did it return".</p>
+
+  <h2><span class="n">02</span>The test harness: two pipes, four ends</h2>
+  <p>This is the part that confuses people before any assertion is even reached. Both tests open <strong>two independent <code>net.Pipe()</code> pairs</strong> and use <code>Pipe</code> to join them together in the middle.</p>
+
+<pre>clientEnd, a := net.Pipe()   <span class="c">// connection #1</span>
+b, targetEnd := net.Pipe()   <span class="c">// connection #2</span>
+
+<span class="k">go</span> Pipe(a, b)               <span class="c">// join the inner ends together</span></pre>
+
+  <figure>
+    <div class="fb">
+      <svg viewBox="0 0 700 176" role="img" aria-label="Two net.Pipe pairs joined by Pipe: clientEnd to a, and b to targetEnd, with Pipe copying between a and b">
+        <text class="cp" x="4" y="10">THE TEST OWNS THE OUTER ENDS · PIPE OWNS THE INNER ONES</text>
+
+        <rect class="bx" x="4" y="46" width="104" height="54" rx="3" />
+        <text class="l" x="16" y="68">clientEnd</text>
+        <text class="sm" x="16" y="82">the test</text>
+
+        <rect class="bxf" x="150" y="46" width="60" height="54" rx="3" />
+        <text class="l" x="170" y="76">a</text>
+
+        <rect class="bxf" x="330" y="46" width="60" height="54" rx="3" />
+        <text class="l" x="352" y="76">b</text>
+
+        <rect class="bx" x="432" y="46" width="104" height="54" rx="3" />
+        <text class="l" x="444" y="68">targetEnd</text>
+        <text class="sm" x="444" y="82">the test</text>
+
+        <path class="ak" d="M108 73 H146" />
+        <text class="sm" x="106" y="40">net.Pipe() #1</text>
+        <path class="ak" d="M394 73 H428" />
+        <text class="sm" x="330" y="40">net.Pipe() #2</text>
+
+        <rect x="222" y="28" width="96" height="90" rx="3" fill="none" stroke="currentColor" style="color:var(--ok)" stroke-width="1.2" stroke-dasharray="4 3" />
+        <text class="cp g" x="228" y="24">go Pipe(a, b)</text>
+        <path class="ao" d="M214 60 H326" marker-end="url(#p-o)" />
+        <text class="sm o" x="238" y="54">a → b</text>
+        <path class="ai" d="M326 92 H214" marker-end="url(#p-i)" />
+        <text class="sm i" x="238" y="108">b → a</text>
+
+        <text class="sm" x="556" y="68">only these two</text>
+        <text class="sm" x="556" y="80">are visible to</text>
+        <text class="sm" x="556" y="92">the test</text>
+
+        <path class="ao" d="M40 128 H196 V106" marker-end="url(#p-o2)" />
+        <text class="sm o" x="46" y="142">a write here…</text>
+        <path class="ao" d="M348 106 V128 H500" marker-end="url(#p-o3)" />
+        <text class="sm o" x="400" y="142">…comes out here</text>
+
+        <defs>
+          <marker id="p-o" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="currentColor" style="color:var(--out)"/></marker>
+          <marker id="p-i" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="currentColor" style="color:var(--in)"/></marker>
+          <marker id="p-o2" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="currentColor" style="color:var(--out)"/></marker>
+          <marker id="p-o3" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="currentColor" style="color:var(--out)"/></marker>
+        </defs>
+      </svg>
+    </div>
+    <figcaption><b>Fig 1</b> <code>a</code> and <code>b</code> stand in for the two <em>real</em> sockets in <code>handleConn</code> — the accepted client connection and the target connection we dialled. <code>clientEnd</code> and <code>targetEnd</code> are the test playing both peers.</figcaption>
+  </figure>
+
+  <div class="box">
+    <div class="box__t">Why net.Pipe and not a real socket</div>
+    <p><code>Pipe</code> takes <code>io.ReadWriteCloser</code>, not <code>net.Conn</code> — and that widened signature is what makes it testable. <code>net.Pipe()</code> gives you a connected pair in memory: <strong>no listener, no port, no kernel, no <code>localhost</code></strong>. Nothing to bind, nothing left over between tests, nothing that fails in CI because port 9001 was already in use. The tests run in under a millisecond.</p>
+    <p>One property to keep in mind, because both tests are shaped by it: <strong><code>net.Pipe</code> is fully synchronous and unbuffered.</strong> A <code>Write</code> blocks until someone <code>Read</code>s it. A real TCP socket has kernel buffers and would accept a small write immediately; <code>net.Pipe</code> will not.</p>
+  </div>
+
+  <h2><span class="n">03</span>Run it yourself</h2>
+  <p>Below is that exact wiring, running. Each button does one thing the test itself does — nothing more. The line under the diagram says in words what just happened, and the pulsing button is a suggestion for what to press next if you would rather just be led through it.</p>
+
+  <div class="lab">
+    <div class="lab__h">
+      <span class="lab__t">net.Pipe lab · go Pipe(a, b)</span>
+      <span class="lab__s" id="status">idle · both copies parked in Read</span>
+    </div>
+
+    <div class="narr" id="narr">
+      <span class="narr__k">now</span>
+      <span class="narr__b" id="narr-b">Two connections are wired together and both copy goroutines are asleep, each waiting inside a <code>Read</code>. Nothing happens until a peer writes or closes.</span>
+    </div>
+
+    <div class="stage">
+      <svg viewBox="0 0 620 236" role="img" aria-label="Live diagram of the two connections, the two copy goroutines, and the done channel">
+
+        <!-- focus ring, moved by JS to whatever is being described -->
+        <rect id="focus" x="0" y="0" width="0" height="0" rx="4" opacity="0"
+              fill="none" stroke="currentColor" style="color:var(--out)" stroke-width="1.6" stroke-dasharray="4 3" />
+
+        <!-- ============ the two connections (lanes) ============ -->
+        <text class="cp" x="4" y="12">CONNECTION #1 · net.Pipe()</text>
+        <text class="cp" x="330" y="12">CONNECTION #2 · net.Pipe()</text>
+        <line class="ak" x1="150" y1="8" x2="150" y2="16" />
+
+        <!-- peers -->
+        <rect class="bx" id="g-ce" x="4" y="86" width="92" height="46" rx="3" />
+        <text class="l" x="13" y="105">clientEnd</text>
+        <text class="sm" id="t-ce" x="13" y="119">open</text>
+
+        <rect class="bx" id="g-te" x="524" y="86" width="92" height="46" rx="3" />
+        <text class="l" x="533" y="105">targetEnd</text>
+        <text class="sm" id="t-te" x="533" y="119">open</text>
+
+        <!-- inner ends, owned by Pipe -->
+        <rect class="bxf" id="g-a" x="150" y="86" width="40" height="46" rx="3" />
+        <text class="l" x="165" y="106">a</text>
+        <text class="sm" id="t-a" x="152" y="120">·</text>
+
+        <rect class="bxf" id="g-b" x="430" y="86" width="40" height="46" rx="3" />
+        <text class="l" x="445" y="106">b</text>
+        <text class="sm" id="t-b" x="432" y="120">·</text>
+
+        <!-- wires peer <-> inner end -->
+        <path class="ak" id="w-ca" d="M96 109 H146" />
+        <path class="ak" id="w-bt" d="M470 109 H520" />
+
+        <!-- ===== upper lane: client -> target, handled by the a->b copy ===== -->
+        <rect id="box-ab" x="228" y="40" width="164" height="32" rx="3" fill="var(--out-w)"
+              stroke="currentColor" style="color:var(--out)" stroke-width="1" />
+        <text class="l o" x="237" y="54">io.Copy(b, a)</text>
+        <text class="sm" id="t-ab" x="237" y="66">asleep in a.Read</text>
+        <text class="cp o" x="228" y="34">COPY 1 · CLIENT → TARGET</text>
+
+        <path class="ao" id="p-a-up"  d="M170 84 V58 H224" marker-end="url(#l-o)" />
+        <path class="ao" id="p-up-b"  d="M396 58 H450 V84" marker-end="url(#l-o)" />
+
+        <!-- ===== lower lane: target -> client, handled by the b->a copy ===== -->
+        <rect id="box-ba" x="228" y="152" width="164" height="32" rx="3" fill="var(--in-w)"
+              stroke="currentColor" style="color:var(--in)" stroke-width="1" />
+        <text class="l i" x="237" y="166">io.Copy(a, b)</text>
+        <text class="sm" id="t-ba" x="237" y="178">asleep in b.Read</text>
+        <text class="cp i" x="228" y="196">COPY 2 · TARGET → CLIENT</text>
+
+        <path class="ai" id="p-b-dn" d="M450 134 V168 H396" marker-end="url(#l-i2)" />
+        <path class="ai" id="p-dn-a" d="M224 168 H170 V134" marker-end="url(#l-i2)" />
+
+        <!-- the byte in flight -->
+        <g id="pkt" opacity="0">
+          <rect id="pkt-r" x="-26" y="-8" width="52" height="16" rx="2" fill="var(--panel)"
+                stroke="currentColor" stroke-width="1.2" />
+          <text class="l" id="pkt-t" x="0" y="4" text-anchor="middle">·</text>
+        </g>
+
+        <!-- blocked marker, shown where a write cannot land -->
+        <g id="blk" opacity="0">
+          <circle id="blk-c" cx="0" cy="0" r="11" fill="var(--alarm-w)" stroke="currentColor"
+                  style="color:var(--alarm)" stroke-width="1.4" />
+          <text class="l a" id="blk-t" x="0" y="4" text-anchor="middle">✕</text>
+        </g>
+
+        <!-- ============ Pipe + the done channel ============ -->
+        <text class="cp" x="4" y="212">PIPE() · THE CALLER</text>
+        <rect id="g-pipe" class="bxf" x="4" y="216" width="150" height="18" rx="2" />
+        <text class="sm" id="t-pipe" x="12" y="229">blocked on &lt;-done</text>
+
+        <text class="cp" x="176" y="212">DONE · CHAN CAP 2</text>
+        <rect class="bxf" x="176" y="216" width="24" height="18" rx="2" id="slot0" />
+        <rect class="bxf" x="204" y="216" width="24" height="18" rx="2" id="slot1" />
+        <text class="sm" id="t-done" x="238" y="229">empty · nothing sent yet</text>
+
+        <defs>
+          <marker id="l-o" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="currentColor" style="color:var(--out)"/></marker>
+          <marker id="l-i2" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="currentColor" style="color:var(--in)"/></marker>
+        </defs>
+      </svg>
+    </div>
+
+    <div class="ctrl">
+      <div>
+        <span class="ctrl__t">clientEnd · the test playing the client</span>
+        <p class="ctrl__n">Reading means this peer is sitting in a <code>Read</code>, ready to accept bytes — what <code>io.Copy(io.Discard, clientEnd)</code> does in test 2.</p>
+        <div class="row">
+          <button class="pri" id="b-cw">Write "ping"</button>
+          <button id="b-cd">Start reading</button>
+          <button class="dgr" id="b-cc">Close()</button>
+        </div>
+      </div>
+      <div>
+        <span class="ctrl__t">targetEnd · the test playing the target</span>
+        <p class="ctrl__n">Same on this side. A peer that is not reading cannot receive anything, because <code>net.Pipe</code> has no buffer to park bytes in.</p>
+        <div class="row">
+          <button class="pri2" id="b-tw">Write "pong"</button>
+          <button id="b-td">Start reading</button>
+          <button class="dgr" id="b-tc">Close()</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="scen">
+      <span>walk through a test</span>
+      <button id="b-t1">TestPipeRelaysBothDirections</button>
+      <button id="b-t2">TestPipeReturnsWhenOneSideCloses</button>
+      <button id="b-rs">Reset</button>
+      <span class="speed">
+        <span class="speed__l">speed</span>
+        <button id="b-sp" title="Change animation speed">1×</button>
+      </span>
+    </div>
+
+    <div class="logwrap">
+      <div class="logh">go test output, as it would appear</div>
+      <div class="log" id="log"></div>
+    </div>
+  </div>
+
+  <div class="box box--flat">
+    <div class="box__t">Three things to try before reading on</div>
+    <ol>
+      <li><strong>Press “Write &quot;pong&quot;” first, before anything else.</strong> The byte leaves <code>targetEnd</code>, gets picked up by copy 2, and then stops dead at <code>clientEnd</code> — because nobody there is reading. That is <code>net.Pipe</code> being synchronous, and it is exactly why test 2 needs its <code>io.Copy(io.Discard, clientEnd)</code> line. Now press “Start reading” on the client and send it again.</li>
+      <li><strong>Then close the target.</strong> Copy 2 wakes up with <code>io.EOF</code>, sends one value into <code>done</code>, and <code>Pipe</code> returns — while copy 1 is <em>still asleep</em>. Watch that copy stay dimmed but present. That is the whole of test 2.</li>
+      <li><strong>Now close the client too.</strong> Copy 1 finally wakes and sends its value into the <em>second</em> slot, with nobody left to receive it. Imagine that channel had capacity 0 and that send would block forever — a goroutine leaked on every connection.</li>
+    </ol>
+  </div>
+
+  <h2><span class="n">04</span>Test 1 — bytes actually move, both ways</h2>
+  <p>The property that matters: <em>bytes written by either peer come out at the other one.</em> Four lines of setup, then two symmetric round trips.</p>
+
+<pre><span class="k">func</span> TestPipeRelaysBothDirections(t *testing.T) {
+	clientEnd, a := net.Pipe()
+	b, targetEnd := net.Pipe()
+	<span class="k">defer</span> clientEnd.Close()
+	<span class="k">defer</span> targetEnd.Close()
+
+	<span class="k">go</span> Pipe(a, b)
+
+	<span class="c">// client -&gt; target</span>
+	<span class="k">if</span> _, err := clientEnd.Write([]<span class="k">byte</span>(<span class="s">"ping"</span>)); err != <span class="k">nil</span> { … }
+	<span class="k">if</span> got := read(t, targetEnd, <span class="s">4</span>); got != <span class="s">"ping"</span> { … }
+
+	<span class="c">// target -&gt; client, on the same pair of connections</span>
+	<span class="k">if</span> _, err := targetEnd.Write([]<span class="k">byte</span>(<span class="s">"pong"</span>)); err != <span class="k">nil</span> { … }
+	<span class="k">if</span> got := read(t, clientEnd, <span class="s">4</span>); got != <span class="s">"pong"</span> { … }
+}</pre>
+
+  <h3>Why <code>go Pipe(a, b)</code> and not <code>Pipe(a, b)</code></h3>
+  <p>This one line is easy to skim past, and it is the difference between a test that runs and a test that freezes on its very first instruction. The reason is that <strong><code>Pipe</code> never returns while the connections are healthy.</strong> Look again at its last line:</p>
+
+<pre><span class="k">func</span> Pipe(a, b io.ReadWriteCloser) {
+	<span class="c">// … start the two copy goroutines …</span>
+	&lt;-done      <span class="hot">// ← blocks here until a direction ends</span>
+}</pre>
+
+  <p>Nothing sends to <code>done</code> until one of the copies finishes, and a copy only finishes when a connection closes or fails. So at the moment the test starts, <code>Pipe</code> is a function that will not come back for as long as things are working normally.</p>
+
+  <p>A Go test body is itself just a goroutine — the one <code>go test</code> calls <code>TestPipeRelaysBothDirections</code> on. Whatever that goroutine is doing, it can only do one thing at a time. So the question is simply: <em>who</em> sits and waits inside <code>&lt;-done</code>, and who is left free to drive the test?</p>
+
+  <figure>
+    <div class="fb">
+      <svg viewBox="0 0 700 246" role="img" aria-label="Comparison: calling Pipe directly freezes the test goroutine, while go Pipe runs it alongside">
+        <!-- A: direct call -->
+        <text class="cp a" x="4" y="10">A · Pipe(a, b) — CALLED DIRECTLY</text>
+        <line class="life" x1="86" y1="20" x2="86" y2="106" />
+        <text class="sm" x="4" y="30">test goroutine</text>
+
+        <rect class="bxf" x="96" y="22" width="150" height="26" rx="3" />
+        <text class="l" x="105" y="39">net.Pipe() ×2</text>
+        <path class="ak" d="M86 35 H92" />
+
+        <rect x="96" y="54" width="150" height="26" rx="3" fill="var(--alarm-w)" stroke="currentColor" style="color:var(--alarm)" stroke-width="1.2" />
+        <text class="l a" x="105" y="71">Pipe(a, b)</text>
+
+        <rect class="band" x="252" y="54" width="300" height="26" rx="2" />
+        <text class="sm a" x="262" y="71">parked inside &lt;-done · for as long as it takes</text>
+
+        <rect class="bxf" x="96" y="86" width="150" height="26" rx="3" opacity=".4" />
+        <text class="l" x="105" y="103" opacity=".5">clientEnd.Write("ping")</text>
+        <text class="sm a" x="256" y="103">never reached — nothing writes,</text>
+        <text class="sm a" x="256" y="115">so no copy can ever finish</text>
+
+        <text class="l a" x="580" y="71">DEADLOCK</text>
+        <text class="sm a" x="580" y="103">go test panics</text>
+        <text class="sm a" x="580" y="115">after 10 minutes</text>
+
+        <!-- B: go Pipe -->
+        <text class="cp g" x="4" y="150">B · go Pipe(a, b) — RUN ALONGSIDE</text>
+        <line class="life" x1="86" y1="160" x2="86" y2="238" />
+        <text class="sm" x="4" y="170">test goroutine</text>
+
+        <rect class="bxf" x="96" y="162" width="150" height="24" rx="3" />
+        <text class="l" x="105" y="178">go Pipe(a, b)</text>
+        <path class="ak" d="M86 174 H92" />
+
+        <!-- the spawned goroutine, running in parallel -->
+        <rect x="256" y="162" width="290" height="24" rx="3" fill="var(--ok-w)" stroke="currentColor" style="color:var(--ok)" stroke-width="1.2" />
+        <text class="sm g" x="266" y="178">Pipe's own goroutine · parked in &lt;-done, relaying</text>
+        <path class="ao" d="M250 174 H252" marker-end="url(#gp-o)" />
+
+        <rect class="bxf" x="96" y="192" width="150" height="24" rx="3" />
+        <text class="l" x="105" y="208">clientEnd.Write("ping")</text>
+        <text class="sm" x="256" y="208">runs immediately — the test goroutine</text>
+        <rect class="bxf" x="96" y="220" width="150" height="24" rx="3" />
+        <text class="l" x="105" y="236">read(t, targetEnd, 4)</text>
+        <text class="sm" x="256" y="236">was never blocked in the first place</text>
+        <text class="l g" x="580" y="208">PASSES</text>
+
+        <defs>
+          <marker id="gp-o" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="currentColor" style="color:var(--out)"/></marker>
+        </defs>
+      </svg>
+    </div>
+    <figcaption><b>Fig 2</b> In A the test goroutine <em>becomes</em> the thing waiting inside <code>Pipe</code>, so it never reaches the <code>Write</code> that would have made a copy finish. In B it hands that waiting to a second goroutine and keeps its hands free.</figcaption>
+  </figure>
+
+  <div class="box box--warn">
+    <div class="box__t">Why it is a deadlock and not just a slow test</div>
+    <p>It is worth being precise, because “it would block” undersells it. A plain <code>Pipe(a, b)</code> does not merely delay the test — it makes the test <strong>logically impossible to finish</strong>:</p>
+    <ol>
+      <li>The test goroutine waits inside <code>&lt;-done</code>.</li>
+      <li><code>&lt;-done</code> only receives when a copy goroutine finishes.</li>
+      <li>A copy only finishes when <code>clientEnd</code> or <code>targetEnd</code> closes.</li>
+      <li>Those closes are on the lines <em>below</em> the call — in the deferred <code>Close()</code> calls and the rest of the test body.</li>
+      <li>Which the test goroutine cannot reach, <strong>because it is waiting in step 1.</strong></li>
+    </ol>
+    <p>Each side is waiting for the other, and neither can move. Nothing external ever breaks the cycle, so this is not a two-second timeout — it runs until <code>go test</code>'s ten-minute watchdog panics and dumps every goroutine's stack.</p>
+  </div>
+
+  <p>You can watch this happen in the lab above: it is the same shape as pressing <strong>Write “pong”</strong> while nothing is reading the other end. The bytes move, then stop, and the goroutine that was supposed to notice the close is stuck somewhere it can never notice anything.</p>
+
+  <div class="box box--ok">
+    <div class="box__t">The same reasoning applies in production</div>
+    <p>This is not a testing trick. <code>handleConn</code> calls <code>relay.Pipe(client, target)</code> <em>without</em> <code>go</code>, and that is equally correct — because there, blocking is exactly what you want. <code>handleConn</code> has nothing else to do until the connection is over, and its own deferred <code>Close()</code> calls must not run a moment early.</p>
+<pre><span class="c">// main.go — the accept loop</span>
+<span class="k">go</span> handleConn(conn, targetAddr)   <span class="c">// ← the go is HERE instead</span></pre>
+    <p>So the <code>go</code> has not disappeared in production, it has simply moved one level up: one goroutine per connection, and inside it, a <code>Pipe</code> that is allowed to block. <strong>The rule is the same in both places — whoever calls <code>Pipe</code> directly is signing up to wait for the whole connection.</strong> The test cannot sign up for that, because it is the one that has to do the writing.</p>
+  </div>
+
+  <h3>Why the second round trip is not redundant</h3>
+  <p>This is the assertion that catches the <code>io.Copy</code> argument swap. Consider a broken implementation that copies <code>a→a</code> and <code>b→b</code>:</p>
+
+  <div class="vs">
+    <div>
+      <div class="vs__t">"ping" only · passes on a broken Pipe</div>
+      <p>Several incorrect wirings still deliver something somewhere. A single one-way check can pass by accident.</p>
+    </div>
+    <div>
+      <div class="vs__t">"ping" then "pong" · pins the wiring</div>
+      <p>Both directions must work <strong>on the same two connections at the same time</strong>. Only the correct pairing passes both.</p>
+    </div>
+  </div>
+
+  <p>Note the two writes use <strong>different words</strong>. If both were <code>"ping"</code>, a test reading 4 bytes could pass while the bytes came from the wrong direction entirely. <code>"ping"</code>/<code>"pong"</code> lets each assertion identify where the bytes came from.</p>
+
+
+  <h2><span class="n">05</span>Test 2 — the hang this design avoids</h2>
+  <p>This test guards against a specific wrong version of <code>Pipe</code> — the one almost everybody writes first. It is worth seeing that version in full, because on the page it looks not just acceptable but tidier than the real thing.</p>
+
+  <div class="vs">
+    <div>
+      <div class="vs__t">the version that hangs</div>
+<pre><span class="k">func</span> Pipe(a, b io.ReadWriteCloser) {
+	<span class="k">go</span> io.Copy(a, b)   <span class="c">// b → a, nobody watches it</span>
+	io.Copy(b, a)      <span class="c">// a → b, we block until THIS ends</span>
+}</pre>
+      <p>No channel, no buffer, half the lines. One copy runs in the background; the function blocks on the other until it ends. Test 1 passes on this version.</p>
+    </div>
+    <div>
+      <div class="vs__t">the version in the repository</div>
+<pre>done := <span class="k">make</span>(<span class="k">chan struct</span>{}, <span class="s">2</span>)
+<span class="k">go func</span>(){ io.Copy(a, b); done &lt;- <span class="k">struct</span>{}{} }()
+<span class="k">go func</span>(){ io.Copy(b, a); done &lt;- <span class="k">struct</span>{}{} }()
+&lt;-done             <span class="c">// whichever finishes first</span></pre>
+      <p>Both copies are watched, and the function returns on the <em>first</em> one to end rather than on a direction chosen in advance.</p>
+    </div>
+  </div>
+
+  <p>The flaw in the left column is the choice hidden in the word <em>wait</em>: it commits, at the moment the code is written, to <strong>which direction will end first</strong> — and neither side of a TCP connection has any obligation to honour that guess.</p>
+
+  <div class="box box--warn">
+    <div class="box__t">Why it survives casual testing</div>
+    <p>The foreground copy is <code>io.Copy(b, a)</code>, so the only EOF that can ever release <code>Pipe</code> is one arriving on <strong><code>a</code> — the client's side.</strong> Trace the two ways a connection ends:</p>
+    <ol>
+      <li><strong>The client hangs up first.</strong> <code>a</code> returns <code>io.EOF</code>, the foreground copy ends, <code>Pipe</code> returns. <em>Works perfectly.</em></li>
+      <li><strong>The target hangs up first, client stays open.</strong> The EOF arrives on <code>b</code> — which belongs to the <em>backgrounded</em> copy that nobody is waiting on. The foreground copy is still parked in <code>a.Read</code>, and the client, being a well-behaved client, has no reason to close. <em>Hangs indefinitely.</em></li>
+    </ol>
+    <p>Case 1 is what you produce when you test by hand: <code>curl</code> exits, <code>nc</code> gets a <code>^D</code>, the client closes first. Case 2 is what happens in production, and it is the ordinary case — <strong>an HTTP server answering with <code>Connection: close</code>, or any server enforcing an idle timeout, while the client keeps its socket open.</strong> The manual test exercises the one path that works.</p>
+  </div>
+
+  <p>And when it does hang, nothing recovers. The goroutine is parked in a <code>Read</code> on a connection that will never produce another byte, holding both file descriptors, for the lifetime of the process — one leaked pair per affected connection, climbing until <code>too many open files</code>.</p>
+
+  <div class="box box--flat">
+    <div class="box__t">In this repository the bug was avoided, not fixed</div>
+    <p>To be accurate about the history: the working tree never contained the broken version. The commit that introduced forwarding (<code>49f721e</code>) already used the <code>done</code> channel, and said why in its message — <em>“the target closes after replying while the client may hold its side open, so waiting for a specific direction hangs.”</em></p>
+    <p>That is the more common shape of this kind of test. It is not always a regression test for something that broke in production; often it is the record of a decision, written down so the next person to read <code>Pipe</code> and think <em>“this could be two lines shorter”</em> gets a failing test rather than an intermittent production hang. <strong>The test is the reason the tidier version stays rejected.</strong></p>
+  </div>
+
+  <p>Which brings us to the test itself, and its problem: the bug it guards against does not produce a wrong value to compare against. It produces <em>silence</em>.</p>
+
+<pre><span class="k">func</span> TestPipeReturnsWhenOneSideCloses(t *testing.T) {
+	clientEnd, a := net.Pipe()
+	b, targetEnd := net.Pipe()
+	<span class="k">defer</span> clientEnd.Close()
+
+	returned := <span class="k">make</span>(<span class="k">chan struct</span>{})
+	<span class="k">go func</span>() {
+		Pipe(a, b)
+		<span class="k">close</span>(returned)          <span class="c">// ← the only observable event</span>
+	}()
+
+	<span class="k">go</span> io.Copy(io.Discard, clientEnd)   <span class="c">// the client keeps draining</span>
+
+	targetEnd.Write([]<span class="k">byte</span>(<span class="s">"bye"</span>))     <span class="c">// reply…</span>
+	targetEnd.Close()                   <span class="c">// …then hang up</span>
+
+	<span class="k">select</span> {
+	<span class="k">case</span> &lt;-returned:
+		<span class="c">// correct</span>
+	<span class="k">case</span> &lt;-time.After(<span class="s">2</span> * time.Second):
+		t.Fatal(<span class="s">"Pipe did not return after one side closed"</span>)
+	}
+}</pre>
+
+  <h3>The <code>returned</code> channel: how you assert on "it came back"</h3>
+  <p><code>Pipe</code> returns nothing, so there is no value to compare. The solution is to make the <em>return itself</em> visible: run it in a goroutine and <code>close(returned)</code> on the line after. A closed channel is receivable immediately and forever, which is exactly what you want for a single “this has happened” signal. <code>select</code> then races that signal against <code>time.After</code>:</p>
+
+  <div class="vs">
+    <div>
+      <div class="vs__t">without the select</div>
+      <p><code>&lt;-returned</code> alone would block forever on a broken <code>Pipe</code>. The test's only result would be a 10-minute timeout panic.</p>
+    </div>
+    <div>
+      <div class="vs__t">with the select</div>
+      <p>Whichever arrives first wins. Bug present → a clear, named failure in 2 seconds. Bug absent → passes in microseconds; the 2s is an upper limit, never a cost.</p>
+    </div>
+  </div>
+
+  <h3>Why the <code>io.Copy(io.Discard, clientEnd)</code> line is essential</h3>
+  <p>Remove it and the test hangs even though <code>Pipe</code> is correct. Here is the chain of events, worth following once:</p>
+
+  <figure>
+    <div class="fb">
+      <svg viewBox="0 0 700 150" role="img" aria-label="Without a draining client, the write of bye blocks and the EOF is never reached">
+        <text class="cp a" x="4" y="10">WITHOUT THE DRAIN · THE DEADLOCK</text>
+        <rect class="bxf" x="4" y="20" width="150" height="40" rx="3" />
+        <text class="l" x="14" y="36">targetEnd.Write</text>
+        <text class="sm" x="14" y="50">("bye")</text>
+        <path class="aa" d="M158 40 H198" marker-end="url(#d-a)" />
+        <rect class="bxf" x="202" y="20" width="170" height="40" rx="3" />
+        <text class="l" x="212" y="36">G1 reads it, then</text>
+        <text class="sm" x="212" y="50">blocks writing to a</text>
+        <path class="aa" d="M376 40 H416" marker-end="url(#d-a)" />
+        <rect class="bxf" x="420" y="20" width="180" height="40" rx="3" />
+        <text class="l" x="430" y="36">nobody reads clientEnd</text>
+        <text class="sm a" x="430" y="50">so the write never lands</text>
+        <text class="l a" x="612" y="44">stuck</text>
+
+        <path class="aa" d="M292 64 V78 H120 V92" marker-end="url(#d-a)" />
+        <rect class="bxf" x="4" y="96" width="230" height="40" rx="3" />
+        <text class="l" x="14" y="112">G1 never reaches b's EOF</text>
+        <text class="sm a" x="14" y="126">→ never sends to done → Pipe hangs</text>
+        <text class="sm" x="248" y="112">The test fails, but the bug is in the</text>
+        <text class="sm" x="248" y="126">test's model of the client, not in Pipe.</text>
+        <defs><marker id="d-a" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="currentColor" style="color:var(--alarm)"/></marker></defs>
+      </svg>
+    </div>
+    <figcaption><b>Fig 3</b> With <code>net.Pipe</code>, an unread write is a blocked write. The draining is not there just to make the test work — a real client <em>does</em> read the reply it asked for, so the draining is what makes the test client behave like a realistic one.</figcaption>
+  </figure>
+
+  <h3>Why write "bye" before closing, instead of just closing</h3>
+  <p>Because writing and then closing is what really happens in practice. It is an HTTP server answering with <code>Connection: close</code>, or a Redis server reaching its idle timeout: <strong>final bytes, then FIN, while the client's own side is still perfectly open.</strong> A bare <code>Close()</code> with no data would test less, and would not prove that the last bytes are still delivered before the close is noticed.</p>
+
+  <div class="box box--warn">
+    <div class="box__t">What this test would report on the broken version</div>
+    <p>Put the two-line version from the top of this section back into <code>relay.go</code> and run the suite. <strong>Test 1 still passes</strong> — bytes really do move both ways, which is the whole reason the bug is easy to ship. Test 2 is the one that speaks up:</p>
+<pre>--- FAIL: TestPipeReturnsWhenOneSideCloses (2.00s)
+    relay_test.go:70: <span class="hot">Pipe did not return after one side closed</span>
+                      <span class="hot">— it is waiting on the wrong direction</span></pre>
+    <p>Two seconds, one line, and the message names the cause rather than leaving you a stack dump to read. That is the return on writing the <code>select</code> instead of a bare <code>&lt;-returned</code>.</p>
+    <p>One caveat worth knowing, because it is a limit of the test rather than a feature of it: <strong>swap the two lines of the broken version</strong> — foreground <code>io.Copy(a, b)</code>, background <code>io.Copy(b, a)</code> — <strong>and both tests pass again.</strong> That variant waits on the direction test 2 happens to close, so the test sails past it while the same class of bug remains, merely pointed the other way. Catching that one needs a third test that closes the <em>client</em> first.</p>
+  </div>
+
+  <h3>Why only <code>clientEnd</code> gets a deferred Close</h3>
+  <p><code>targetEnd</code> is closed explicitly in the body — that <em>is</em> what the test does to trigger the behaviour. A <code>defer targetEnd.Close()</code> would just be a redundant second close. Test 1, by contrast, closes both because neither is closed during the test; those defers are pure cleanup. And notice what neither test does: <strong>close <code>a</code> or <code>b</code>.</strong> Those belong to <code>Pipe</code>'s caller — in production, <code>handleConn</code>'s two <code>defer</code>s.</p>
+
+  <h2><span class="n">06</span>Check yourself</h2>
+  <p>Answer each one out loud, in a full sentence, before you open it.</p>
+
+  <details>
+    <summary><span class="qn">Q1</span><span>The <code>done</code> channel has capacity 2 but <code>Pipe</code> receives from it exactly once. Why isn't capacity 1 — or 0 — enough?</span><span class="qh">reveal</span></summary>
+    <div class="qa">
+      <p><strong>Because both goroutines send, and only one send is ever received.</strong> The first finisher's value is taken by <code>&lt;-done</code>. The second goroutine finishes later — when the caller's <code>Close()</code> unblocks its <code>Read</code> — and it <em>also</em> executes <code>done &lt;- struct{}{}</code>, with no one left to receive it.</p>
+      <p>On an unbuffered channel that send blocks forever: <strong>a permanently parked goroutine, leaked once per connection.</strong> Capacity 1 is enough for the two sends in <em>this</em> function, but 2 is the accurate number — one slot per sender — so the code stays correct without you having to work out which goroutine finished first.</p>
+      <p>The general rule to remember: <strong>a fan-in channel needs a slot for every sender you will not wait for.</strong> No goroutine leak is visible in a passing test — which is why <code>go test -race</code> and, in bigger codebases, <code>goleak</code> exist.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary><span class="qn">Q2</span><span>Test 1 writes 4 bytes and reads 4 bytes. Why does <code>read()</code> use <code>io.ReadFull</code> rather than a plain <code>Read</code> — surely 4 bytes arrive at once?</span><span class="qh">reveal</span></summary>
+    <div class="qa">
+      <p><strong>Because <code>Read</code> is only required to return <em>some</em> bytes, never a specific number.</strong> Nothing in the interface promises that a 4-byte write arrives as a single 4-byte read: <code>io.Copy</code>'s internal buffering, TCP segmentation, or a short <code>net.Pipe</code> read can all split it.</p>
+      <p>With plain <code>Read</code> you would compare <code>"pi"</code> against <code>"ping"</code> and fail intermittently — the worst kind of test failure, because it looks like a real bug and then disappears when you run it again. <code>ReadFull</code> loops until it has exactly <code>n</code> or errors out. The helper the test calls is four lines:</p>
+<pre><span class="k">func</span> read(t *testing.T, c net.Conn, n <span class="k">int</span>) <span class="k">string</span> {
+	t.Helper()
+	c.SetReadDeadline(time.Now().Add(<span class="s">2</span> * time.Second))  <span class="c">// a hang becomes a failure</span>
+	buf := <span class="k">make</span>([]<span class="k">byte</span>, n)
+	<span class="k">if</span> _, err := io.ReadFull(c, buf); err != <span class="k">nil</span> {   <span class="c">// exactly n, or fail</span>
+		t.Fatalf(<span class="s">"read: %v"</span>, err)
+	}
+	<span class="k">return string</span>(buf)
+}</pre>
+      <p>The <code>SetReadDeadline</code> line matters just as much: without it a broken <code>Pipe</code> makes the read hang until <code>go test</code>'s ten-minute panic, so you would get a goroutine dump instead of a clear <code>read: i/o timeout</code>.</p>
+      <p>This is a general property of stream protocols, not a test detail: <strong>message boundaries do not survive a byte stream.</strong> Any real protocol built on TCP has to recreate them — with a length prefix, a delimiter, or a fixed size.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary><span class="qn">Q3</span><span>You swap the arguments in one goroutine so both copies read from <code>a</code>: <code>io.Copy(b, a)</code> and <code>io.Copy(b, a)</code>. Which of the two tests fails, and how?</span><span class="qh">reveal</span></summary>
+    <div class="qa">
+      <p><strong>Test 1 fails; test 2 still passes.</strong></p>
+      <p>Test 1's first round trip may even succeed — something copies <code>a→b</code>, so <code>"ping"</code> can reach <code>targetEnd</code>. The second round trip is the one that fails: nothing copies <code>b→a</code>, so <code>"pong"</code> has no path back, and <code>read(t, clientEnd, 4)</code> fails with <code>read: i/o timeout</code> after two seconds — which is exactly what the deadline is for.</p>
+      <p>Test 2 passes anyway, because closing <code>targetEnd</code> still gives <em>some</em> copy an EOF, so <code>done</code> still receives and <code>Pipe</code> still returns. <strong>That is precisely why both tests exist:</strong> test 2 checks that it returns and cannot see the wiring; test 1 checks the wiring and cannot see a hang. Neither one alone pins the contract.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary><span class="qn">Q4</span><span>In test 2, replace <code>select { case &lt;-returned: … }</code> with a bare <code>&lt;-returned</code>. The test still passes today. What have you actually given up?</span><span class="qh">reveal</span></summary>
+    <div class="qa">
+      <p><strong>The ability to be told what went wrong.</strong> With correct code both versions pass in the same way — the 2-second timeout is an upper limit that is never reached, not a delay.</p>
+      <p>The difference only shows on <em>broken</em> code, which is the only time a test's output matters. With the <code>select</code>: a 2-second failure reading <code>Pipe did not return after one side closed — it is waiting on the wrong direction</code>. With the bare receive: the test hangs, <code>go test</code> panics after its 10-minute timeout, and you are left with a goroutine dump to interpret yourself. In CI that is a ten-minute failed build with no explanation.</p>
+      <p>The principle: <strong>every blocking operation in a test needs a bound.</strong> A deadline for I/O, a <code>select</code> with <code>time.After</code> for channels. Design the failure message, not only the assertion.</p>
+    </div>
+  </details>
+
+  <details>
+    <summary><span class="qn">Q5</span><span><code>Pipe</code> deliberately doesn't close <code>a</code> or <code>b</code>. After it returns, one goroutine is still parked in a <code>Read</code>. Who ends it — and what do the tests say about that?</span><span class="qh">reveal</span></summary>
+    <div class="qa">
+      <p><strong>The caller, by closing the connections.</strong> In <code>handleConn</code>, <code>Pipe</code> returning triggers the two deferred <code>Close()</code> calls; closing a descriptor makes the parked <code>Read</code> return <code>net.ErrClosed</code>, the survivor's <code>io.Copy</code> ends, and it sends into the free slot in <code>done</code>. That is lesson 1's asymmetry again: <em>their</em> close ends one direction, <em>your</em> close ends the other.</p>
+      <p>What the tests say about it: <strong>almost nothing, and that is a real gap.</strong> They assert that <code>Pipe</code> returns; they never assert that the second goroutine finishes. <code>go test</code> exits and the OS reclaims everything, so a leak here is invisible. The proper way to close it is <code>goleak.VerifyNone(t)</code> in a <code>TestMain</code>, or asserting on <code>runtime.NumGoroutine()</code> after a short pause — a good next commit.</p>
+      <p>The design point stands on its own though: <strong>the component that did not create the connections should not close them.</strong> Ownership stays with the caller, which is also what lets the same <code>Pipe</code> work with a TCP socket, a Unix socket and a <code>net.Pipe</code> without any change.</p>
+    </div>
+  </details>
+
+  <h2><span class="n">07</span>Predict first</h2>
+  <p>Four one-line changes to <code>relay.go</code>. For each: <strong>which test fails, and does it fail by asserting or by hanging?</strong> Write all four before revealing.</p>
+
+  <div class="predict">
+    <div class="ph">Write it down before you reveal</div>
+    <div class="pb2">
+      <div class="slot">
+        <span class="slot__t">1 · make(chan struct{}, 2) → make(chan struct{})</span>
+        <textarea aria-label="Prediction for change 1"></textarea>
+      </div>
+      <div class="slot">
+        <span class="slot__t">2 · &lt;-done → &lt;-done; &lt;-done  (wait for both)</span>
+        <textarea aria-label="Prediction for change 2"></textarea>
+      </div>
+      <div class="slot">
+        <span class="slot__t">3 · add defer a.Close(); defer b.Close() inside Pipe</span>
+        <textarea aria-label="Prediction for change 3"></textarea>
+      </div>
+      <div class="slot">
+        <span class="slot__t">4 · delete the second goroutine entirely</span>
+        <textarea aria-label="Prediction for change 4"></textarea>
+      </div>
+      <button class="btn" id="btn">I've written all four — reveal</button>
+
+      <div id="ans" hidden>
+        <div class="box box--ok">
+          <div class="box__t">Answers</div>
+          <p><strong>1 · Unbuffered channel — both tests still pass.</strong> This is the awkward one. The first send hands off to <code>&lt;-done</code>, <code>Pipe</code> returns, and the second goroutine parks on its send forever. In production that is a leaked goroutine per connection; in the test suite it is completely invisible, because nothing observes goroutine count. <strong>A change that survives your tests is a gap in the tests, not a harmless change</strong> — this is the <code>goleak</code> gap from Q5.</p>
+          <p><strong>2 · Waiting for both — test 2 hangs, and its <code>select</code> reports it in 2 seconds.</strong> This is the original bug in a new form: the target closes, one copy ends, and the second <code>&lt;-done</code> waits on a direction whose <code>Read</code> nobody will ever unblock, since neither test closes <code>a</code> or <code>b</code>. Test 1 still passes — it never closes anything mid-test, so it never reaches the wait.</p>
+          <p><strong>3 · Closing inside Pipe — both tests pass, and one even runs faster.</strong> Also awkward: this change arguably <em>fixes</em> the leak from #1. It is still wrong, but for a reason no assertion here can see — it takes ownership of connections it didn't create, so <code>handleConn</code>'s defers become double closes, and no caller can reuse a connection after relaying. That is a design rule, and the tests do not express it. <strong>Not every requirement is testable; some live in the doc comment.</strong></p>
+          <p><strong>4 · One goroutine only — test 1 fails on the "pong" round trip with <code>read: i/o timeout</code>; test 2 still passes.</strong> The same division as in Q3, and the clearest example of how the two tests divide the work: the surviving direction still delivers an EOF, so <code>Pipe</code> still returns while the relay is half broken. <strong>Test 2 cannot see wiring; test 1 cannot see hangs.</strong></p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2><span class="n">08</span>Verify it yourself</h2>
+  <p>The tests are fast and self-contained, so you can afford the strictest flags.</p>
+
+<pre>$ go test ./internal/relay/ -v            <span class="c"># both tests, ~0.4s</span>
+$ go test ./internal/relay/ -race         <span class="c"># two goroutines share a channel — always run this</span>
+$ go test ./internal/relay/ -count=20     <span class="c"># timing-dependent tests: rerun to expose flakes</span>
+$ go test ./internal/relay/ -run Returns -v</pre>
+
+  <div class="box box--ok">
+    <div class="box__t">Then break it on purpose</div>
+    <p>Apply change 2 from above — <code>&lt;-done</code> twice — and run <code>go test -v</code>. Watch test 1 pass, then test 2 wait for two seconds and fail with the message that names the cause. <strong>A test you have never seen fail is a test you do not know works.</strong> Then apply change 1, watch both tests pass, and think about that for a moment: it is the more useful lesson of the two.</p>
+  </div>
+
+  <div class="recap">
+    <div class="recap__t">What to carry forward</div>
+    <ol>
+      <li><strong>Two tests, two properties.</strong> "Bytes move both ways" and "it comes back" are independent; neither test can see the other's failure. That is why there are two of them.</li>
+      <li><strong>Widening a parameter to an interface is a testability decision.</strong> <code>io.ReadWriteCloser</code> instead of <code>net.Conn</code> is what buys <code>net.Pipe</code> — no ports, no listeners, no unreliable tests.</li>
+      <li><strong>Bound every blocking operation in a test.</strong> <code>SetReadDeadline</code> for I/O, <code>select</code> + <code>time.After</code> for channels. A hanging test reports nothing; a bounded one names its cause.</li>
+      <li><strong>Make the invisible visible.</strong> <code>Pipe</code> returns no value, so test 2 wraps it in a goroutine and closes a channel — the return itself becomes the assertion.</li>
+      <li><strong>Use test data you can tell apart.</strong> <code>"ping"</code> vs <code>"pong"</code>, not two identical strings, so a passing assertion proves the bytes came from where you expect.</li>
+      <li><strong>A fan-in channel needs a slot per sender you won't wait for</strong> — and no test here can tell you if you got it wrong. Some correctness lives outside the assertions.</li>
+    </ol>
+  </div>
+
+  <footer>
+    <span>sandboxing-prototype · Theory/02</span>
+    <span>next: goleak, read deadlines, and the second connection</span>
+  </footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // --- reveal button (predict section) ---
+  var btn = document.getElementById("btn");
+  btn.addEventListener("click", function () {
+    var ans = document.getElementById("ans");
+    ans.hidden = false;
+    this.disabled = true;
+    this.textContent = "revealed";
+    ans.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "nearest" });
+  });
+
+  // ================================================================ the lab
+  var $ = function (id) { return document.getElementById(id); };
+  var logEl = $("log");
+
+  // Animation is deliberately slow: each hop is a separate, readable step.
+  // 1x is the default; the speed button cycles through these.
+  var SPEEDS = [
+    { label: "0.5×", k: 2 },
+    { label: "1×",   k: 1 },
+    { label: "2×",   k: 0.5 }
+  ];
+  var speedIdx = 1;
+  function k() { return SPEEDS[speedIdx].k; }
+  // base durations, in ms, at 1x
+  var D_HOP = 900;   // one leg of the journey
+  var D_HOLD = 620;  // pause at each waypoint, so you can read the label
+  var D_STEP = 780;  // gap between scripted test steps
+
+  var S;
+  function fresh() {
+    return {
+      clientOpen: true, targetOpen: true,
+      clientReading: false, targetReading: false,
+      copyAB: "asleep",  // asleep | ended   client -> target
+      copyBA: "asleep",  // asleep | ended   target -> client
+      buffered: 0,
+      returned: false,
+      t: 0,
+      busy: false,
+      scripted: false,
+      hint: "b-tw"       // which button to pulse next
+    };
+  }
+
+  // ---------------------------------------------------------------- output
+  function log(msg, cls) {
+    var row = document.createElement("div");
+    var t = document.createElement("span");
+    t.className = "t";
+    t.textContent = (S.t += 1) + "";
+    var m = document.createElement("span");
+    m.className = "m-" + (cls || "n");
+    m.textContent = msg;
+    row.appendChild(t); row.appendChild(m);
+    logEl.appendChild(row);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  // the narration strip — plain words for what just happened
+  function say(html, tone) {
+    $("narr-b").innerHTML = html;
+    $("narr").className = "narr" + (tone ? " is-" + tone : "");
+  }
+
+  var FOCUS = {
+    "g-ce":   [4, 86, 92, 46],
+    "g-te":   [524, 86, 92, 46],
+    "g-a":    [150, 86, 40, 46],
+    "g-b":    [430, 86, 40, 46],
+    "box-ab": [228, 40, 164, 32],
+    "box-ba": [228, 152, 164, 32],
+    "done":   [176, 216, 52, 18],
+    "pipe":   [4, 216, 150, 18]
+  };
+  function focus(name, colour) {
+    var f = $("focus");
+    if (!name) { f.setAttribute("opacity", "0"); return; }
+    var r = FOCUS[name];
+    f.setAttribute("x", r[0] - 5); f.setAttribute("y", r[1] - 5);
+    f.setAttribute("width", r[2] + 10); f.setAttribute("height", r[3] + 10);
+    f.style.color = colour || "var(--out)";
+    f.setAttribute("opacity", "1");
+  }
+
+  function setText(id, s) { $(id).textContent = s; }
+
+  // ---------------------------------------------------------------- render
+  function render() {
+    setText("t-ce", !S.clientOpen ? "closed" : (S.clientReading ? "reading" : "not reading"));
+    setText("t-te", !S.targetOpen ? "closed" : (S.targetReading ? "reading" : "not reading"));
+    $("t-ce").setAttribute("fill", !S.clientOpen ? "var(--alarm)"
+                       : S.clientReading ? "var(--ok)" : "var(--muted)");
+    $("t-te").setAttribute("fill", !S.targetOpen ? "var(--alarm)"
+                       : S.targetReading ? "var(--ok)" : "var(--muted)");
+    $("g-ce").setAttribute("stroke", S.clientOpen ? "var(--soft)" : "var(--alarm)");
+    $("g-te").setAttribute("stroke", S.targetOpen ? "var(--soft)" : "var(--alarm)");
+
+    setText("t-ab", S.copyAB === "ended" ? "ended · got EOF" : "asleep in a.Read");
+    setText("t-ba", S.copyBA === "ended" ? "ended · got EOF" : "asleep in b.Read");
+    $("t-ab").setAttribute("fill", S.copyAB === "ended" ? "var(--alarm)" : "var(--muted)");
+    $("t-ba").setAttribute("fill", S.copyBA === "ended" ? "var(--alarm)" : "var(--muted)");
+    $("box-ab").setAttribute("opacity", S.copyAB === "ended" ? ".38" : "1");
+    $("box-ba").setAttribute("opacity", S.copyBA === "ended" ? ".38" : "1");
+    ["p-a-up", "p-up-b"].forEach(function (id) {
+      $(id).setAttribute("opacity", S.copyAB === "ended" ? ".25" : "1");
+    });
+    ["p-b-dn", "p-dn-a"].forEach(function (id) {
+      $(id).setAttribute("opacity", S.copyBA === "ended" ? ".25" : "1");
+    });
+
+    // A value taken by <-done occupies no slot; only unreceived sends sit in
+    // the buffer. Colour the slots by what is genuinely still waiting.
+    $("slot0").setAttribute("fill", S.buffered >= 1 ? "var(--alarm)" : "var(--bg2)");
+    $("slot1").setAttribute("fill", S.buffered >= 2 ? "var(--alarm)" : "var(--bg2)");
+    $("slot0").setAttribute("stroke", S.buffered >= 1 ? "var(--alarm)" : "var(--line)");
+    $("slot1").setAttribute("stroke", S.buffered >= 2 ? "var(--alarm)" : "var(--line)");
+
+    if (S.returned) {
+      setText("t-done", S.buffered === 0
+        ? "1 value received · buffer empty"
+        : S.buffered + " unreceived send" + (S.buffered > 1 ? "s" : "") + " stuck in the buffer");
+      setText("t-pipe", "RETURNED");
+      $("g-pipe").setAttribute("stroke", "var(--ok)");
+      $("t-pipe").setAttribute("fill", "var(--ok)");
+    } else {
+      setText("t-done", "empty · nothing sent yet");
+      setText("t-pipe", "blocked on <-done");
+      $("g-pipe").setAttribute("stroke", "var(--line)");
+      $("t-pipe").setAttribute("fill", "var(--muted)");
+    }
+
+    var st = $("status");
+    st.className = "lab__s";
+    if (S.returned) {
+      st.className += " is-ret";
+      st.textContent = "Pipe returned · " +
+        (S.copyAB === "ended" && S.copyBA === "ended"
+          ? "both copies finished"
+          : "one copy still asleep");
+    } else {
+      st.textContent = "running · both copies parked in Read";
+    }
+
+    // buttons
+    $("b-cw").disabled = !S.clientOpen || S.busy;
+    $("b-tw").disabled = !S.targetOpen || S.busy;
+    $("b-cc").disabled = !S.clientOpen || S.busy;
+    $("b-tc").disabled = !S.targetOpen || S.busy;
+    $("b-cd").disabled = !S.clientOpen || S.clientReading || S.busy;
+    $("b-td").disabled = !S.targetOpen || S.targetReading || S.busy;
+    $("b-cd").className = S.clientReading ? "on" : "";
+    $("b-td").className = S.targetReading ? "on" : "";
+    if (S.clientReading) $("b-cd").textContent = "reading ✓";
+    if (S.targetReading) $("b-td").textContent = "reading ✓";
+
+    // one pulsing suggestion at a time
+    ["b-cw", "b-tw", "b-cd", "b-td", "b-cc", "b-tc"].forEach(function (id) {
+      $(id).classList.remove("hint");
+    });
+    if (!S.busy && !S.scripted && S.hint && !$(S.hint).disabled) {
+      $(S.hint).classList.add("hint");
+    }
+  }
+
+  // ------------------------------------------------------- the moving byte
+  // A journey is a list of waypoints; we animate leg by leg with a pause at
+  // each one, so the path through a, the copy, and b is actually readable.
+  function journey(text, colour, legs, done) {
+    var pkt = $("pkt"), r = $("pkt-r"), tx = $("pkt-t");
+    var w = Math.max(38, text.length * 7.2 + 14);
+    r.setAttribute("width", w); r.setAttribute("x", -w / 2);
+    r.setAttribute("stroke", colour);
+    tx.textContent = text; tx.setAttribute("fill", colour);
+    pkt.setAttribute("opacity", "1");
+
+    var i = 0;
+    function hop() {
+      if (i >= legs.length - 1) { pkt.setAttribute("opacity", "0"); done && done(); return; }
+      var from = legs[i], to = legs[i + 1];
+      i++;
+      if (to.at) to.at();
+
+      if (reduce) {
+        pkt.setAttribute("transform", "translate(" + to.x + "," + to.y + ")");
+        setTimeout(hop, 40);
+        return;
+      }
+      var dur = D_HOP * k(), t0 = null;
+      function step(ts) {
+        if (t0 === null) t0 = ts;
+        var p = Math.min(1, (ts - t0) / dur);
+        var e = p < .5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+        pkt.setAttribute("transform",
+          "translate(" + (from.x + (to.x - from.x) * e) + "," + (from.y + (to.y - from.y) * e) + ")");
+        if (p < 1) requestAnimationFrame(step);
+        else setTimeout(hop, D_HOLD * k());
+      }
+      requestAnimationFrame(step);
+    }
+    hop();
+  }
+
+  function blockAt(x, y) {
+    var g = $("blk");
+    g.setAttribute("transform", "translate(" + x + "," + y + ")");
+    g.setAttribute("opacity", "1");
+  }
+  function clearBlock() { $("blk").setAttribute("opacity", "0"); }
+
+  // ------------------------------------------------------ a copy goroutine ends
+  function endCopy(which, why) {
+    if (which === "ab") { if (S.copyAB === "ended") return; S.copyAB = "ended"; }
+    else { if (S.copyBA === "ended") return; S.copyBA = "ended"; }
+
+    var name = which === "ab" ? "io.Copy(b, a)" : "io.Copy(a, b)";
+    var num  = which === "ab" ? "Copy 1" : "Copy 2";
+    log(name + ": Read returned " + why + " — the copy ends", which === "ab" ? "o" : "i");
+
+    if (!S.returned) {
+      S.returned = true;
+      log("done <- struct{}{}   received by <-done", "g");
+      log("Pipe RETURNS — the other copy is still asleep", "g");
+      focus("pipe", "var(--ok)");
+      say("<strong>" + num + " finished first, so <code>Pipe</code> returned.</strong> Its value went " +
+          "straight to <code>&lt;-done</code>. The other copy is still asleep in its <code>Read</code> " +
+          "(dimmed above) — <code>Pipe</code> did not wait for it, and that is the whole point of " +
+          "receiving <em>one</em> value instead of two.", "good");
+    } else {
+      S.buffered += 1;
+      log("done <- struct{}{}   nobody receiving — sits in slot " + S.buffered + " of 2", "a");
+      focus("done", "var(--alarm)");
+      say("<strong>" + num + " has now finished too, but <code>Pipe</code> already returned.</strong> " +
+          "Its send lands in buffer slot " + S.buffered + " and no one will ever receive it. " +
+          "This is why the channel is <code>make(chan struct{}, 2)</code>: with capacity 0 this send " +
+          "would block forever and leak the goroutine.", "block");
+    }
+    render();
+  }
+
+  // ---------------------------------------------------------------- write
+  function write(side, word) {
+    if (S.busy) return;
+    clearBlock();
+
+    var toClient = side === "target";
+    var copy = toClient ? "copyBA" : "copyAB";
+    var copyName = toClient ? "Copy 2" : "Copy 1";
+    var colour = toClient ? "var(--in)" : "var(--out)";
+    var cls = toClient ? "i" : "o";
+    var src = toClient ? "targetEnd" : "clientEnd";
+    var dst = toClient ? "clientEnd" : "targetEnd";
+    var farOpen = toClient ? S.clientOpen : S.targetOpen;
+    var farReading = toClient ? S.clientReading : S.targetReading;
+
+    log(src + '.Write("' + word + '")', cls);
+
+    if (S[copy] === "ended") {
+      focus(toClient ? "box-ba" : "box-ab", "var(--alarm)");
+      log("that copy has already ended — nothing relays the bytes", "a");
+      say("<strong>Nothing moves.</strong> " + copyName + " has already ended, so there is no " +
+          "goroutine left reading this direction. In a real program the write would block until " +
+          "someone closed the connection.", "block");
+      render(); return;
+    }
+
+    // Build the real path: peer -> inner end -> copy goroutine -> inner end -> peer
+    var legs = toClient
+      ? [ {x:570,y:109}, {x:450,y:109}, {x:310,y:168}, {x:170,y:109}, {x:50,y:109} ]
+      : [ {x:50,y:109},  {x:170,y:109}, {x:310,y:58},  {x:450,y:109}, {x:570,y:109} ];
+
+    S.busy = true; render();
+
+    var innerFirst = toClient ? "g-b" : "g-a";
+    var innerLast  = toClient ? "g-a" : "g-b";
+    var boxId      = toClient ? "box-ba" : "box-ab";
+
+    focus(innerFirst, colour);
+    say("<code>" + src + '.Write("' + word + '")</code> hands the bytes to <code>' +
+        (toClient ? "b" : "a") + "</code>, the end that <code>Pipe</code> owns.");
+
+    // annotate each waypoint as the byte reaches it
+    legs[1].at = function () {
+      focus(boxId, colour);
+      say("<strong>" + copyName + " wakes up.</strong> Its <code>Read</code> on <code>" +
+          (toClient ? "b" : "a") + "</code> has returned " + word.length +
+          " bytes, so <code>io.Copy</code> now writes them to the other side.");
+    };
+    legs[2].at = function () {
+      focus(innerLast, colour);
+      say("<code>io.Copy</code> writes the bytes into <code>" + (toClient ? "a" : "b") +
+          "</code>. Whether they actually arrive depends entirely on the peer beyond it.");
+    };
+    legs[3].at = function () {
+      if (!farOpen || !farReading) {
+        focus(toClient ? "g-ce" : "g-te", "var(--alarm)");
+      } else {
+        focus(toClient ? "g-ce" : "g-te", "var(--ok)");
+      }
+    };
+
+    // does the last leg succeed?
+    if (!farOpen) {
+      journey(word, colour, legs.slice(0, 4), function () {
+        blockAt(toClient ? 120 : 500, 109);
+        log("write to " + dst + " fails: io.ErrClosedPipe", "a");
+        say("<strong>" + dst + " is closed, so the write fails</strong> with " +
+            "<code>io.ErrClosedPipe</code>. <code>io.Copy</code> stops on a write error, " +
+            "so " + copyName + " ends here too.", "block");
+        S.busy = false;
+        endCopy(toClient ? "ba" : "ab", "a write error");
+      });
+      return;
+    }
+
+    if (!farReading) {
+      journey(word, colour, legs.slice(0, 4), function () {
+        blockAt(toClient ? 120 : 500, 109);
+        log("blocked: nobody is reading " + dst + ", so the write cannot complete", "a");
+        say("<strong>The bytes stop here.</strong> Nobody is reading <code>" + dst +
+            "</code>, and <code>net.Pipe</code> has no buffer, so this write blocks. " +
+            copyName + " is now stuck mid-copy — it will never reach its next " +
+            "<code>Read</code>, so it can never notice an EOF either. " +
+            "<strong>Press “Start reading” on that side, then write again.</strong>", "block");
+        S.busy = false;
+        S.hint = toClient ? "b-cd" : "b-td";
+        render();
+      });
+      return;
+    }
+
+    journey(word, colour, legs, function () {
+      log('"' + word + '" arrives at ' + dst + " — relayed", "g");
+      say("<strong>“" + word + "” arrived at " + dst + ".</strong> That is one full " +
+          "relay: peer → <code>" + (toClient ? "b" : "a") + "</code> → " + copyName +
+          " → <code>" + (toClient ? "a" : "b") + "</code> → peer. " +
+          "In the test this is the line <code>read(t, " + dst + ", 4)</code> succeeding.", "good");
+      S.busy = false;
+      S.hint = toClient ? "b-tc" : "b-td";
+      render();
+    });
+  }
+
+  // ---------------------------------------------------------------- reading
+  function startReading(side) {
+    clearBlock();
+    if (side === "client") {
+      S.clientReading = true;
+      log("go io.Copy(io.Discard, clientEnd)   client is now reading", "n");
+      focus("g-ce", "var(--ok)");
+      say("<strong>The client is now sitting in a <code>Read</code>.</strong> This is exactly the " +
+          "<code>go io.Copy(io.Discard, clientEnd)</code> line in test 2 — without it, anything " +
+          "relayed towards the client has nowhere to land.", "good");
+      S.hint = "b-tw";
+    } else {
+      S.targetReading = true;
+      log("go io.Copy(io.Discard, targetEnd)   target is now reading", "n");
+      focus("g-te", "var(--ok)");
+      say("<strong>The target is now sitting in a <code>Read</code>.</strong> Bytes relayed " +
+          "towards it can now be delivered.", "good");
+      S.hint = "b-cw";
+    }
+    render();
+  }
+
+  // ---------------------------------------------------------------- close
+  function closePeer(side) {
+    clearBlock();
+    if (side === "client") {
+      if (!S.clientOpen) return;
+      S.clientOpen = false; S.clientReading = false;
+      $("b-cd").textContent = "Start reading";
+      log("clientEnd.Close()   sends FIN towards a", "a");
+      focus("g-a", "var(--alarm)");
+      say("<code>clientEnd.Close()</code> — the copy reading from <code>a</code> " +
+          "gets <code>io.EOF</code>.");
+      setTimeout(function () { endCopy("ab", "io.EOF"); }, reduce ? 20 : 420 * k());
+      S.hint = S.targetOpen ? "b-tc" : null;
+    } else {
+      if (!S.targetOpen) return;
+      S.targetOpen = false; S.targetReading = false;
+      $("b-td").textContent = "Start reading";
+      log("targetEnd.Close()   sends FIN towards b", "a");
+      focus("g-b", "var(--alarm)");
+      say("<code>targetEnd.Close()</code> — the copy reading from <code>b</code> " +
+          "gets <code>io.EOF</code>. This is the stimulus in test 2.");
+      setTimeout(function () { endCopy("ba", "io.EOF"); }, reduce ? 20 : 420 * k());
+      S.hint = S.clientOpen ? "b-cc" : null;
+    }
+    render();
+  }
+
+  // ---------------------------------------------------------------- reset
+  function reset(quiet) {
+    S = fresh();
+    logEl.innerHTML = "";
+    clearBlock();
+    focus(null);
+    $("pkt").setAttribute("opacity", "0");
+    $("b-cd").textContent = "Start reading";
+    $("b-td").textContent = "Start reading";
+    say("Two connections are wired together and both copy goroutines are asleep, each waiting " +
+        "inside a <code>Read</code>. Nothing happens until a peer writes or closes. " +
+        "<strong>Try the pulsing button.</strong>");
+    if (!quiet) {
+      log("clientEnd, a := net.Pipe()", "n");
+      log("b, targetEnd := net.Pipe()", "n");
+      log("go Pipe(a, b)", "n");
+    }
+    render();
+  }
+
+  $("b-cw").addEventListener("click", function () { write("client", "ping"); });
+  $("b-tw").addEventListener("click", function () { write("target", "pong"); });
+  $("b-cd").addEventListener("click", function () { startReading("client"); });
+  $("b-td").addEventListener("click", function () { startReading("target"); });
+  $("b-cc").addEventListener("click", function () { closePeer("client"); });
+  $("b-tc").addEventListener("click", function () { closePeer("target"); });
+  $("b-rs").addEventListener("click", function () { reset(); });
+
+  $("b-sp").addEventListener("click", function () {
+    speedIdx = (speedIdx + 1) % SPEEDS.length;
+    this.textContent = SPEEDS[speedIdx].label;
+  });
+
+  // -------------------------------------------------- scripted walkthroughs
+  // Each step waits for the previous animation to settle before firing.
+  function run(steps) {
+    reset();
+    S.scripted = true;
+    var i = 0;
+    (function next() {
+      if (i >= steps.length) { S.scripted = false; S.hint = null; render(); return; }
+      var s = steps[i++];
+      s();
+      var wait = function () {
+        if (S.busy) { setTimeout(wait, 120); return; }
+        setTimeout(next, reduce ? 40 : D_STEP * k());
+      };
+      setTimeout(wait, 60);
+    })();
+  }
+
+  $("b-t1").addEventListener("click", function () {
+    run([
+      function () { log("=== RUN   TestPipeRelaysBothDirections", "n"); startReading("target"); },
+      function () { write("client", "ping"); },
+      function () { log('read(t, targetEnd, 4) == "ping"  OK', "g"); startReading("client"); },
+      function () { write("target", "pong"); },
+      function () {
+        log('read(t, clientEnd, 4) == "pong"  OK', "g");
+        log("--- PASS: TestPipeRelaysBothDirections", "g");
+        say("<strong>Both directions work on the same pair of connections.</strong> That is the " +
+            "whole assertion of test 1 — and the reason it checks two round trips instead of " +
+            "one, because a single direction can succeed by accident on wrongly wired code.", "good");
+      },
+      function () { log("deferred clientEnd.Close() and targetEnd.Close() run", "n"); closePeer("client"); },
+      function () { closePeer("target"); }
+    ]);
+  });
+
+  $("b-t2").addEventListener("click", function () {
+    run([
+      function () { log("=== RUN   TestPipeReturnsWhenOneSideCloses", "n"); },
+      function () { startReading("client"); },
+      function () { write("target", "bye"); },
+      function () { closePeer("target"); },
+      function () {
+        log("<-returned won the select", "g");
+        log("--- PASS: TestPipeReturnsWhenOneSideCloses", "g");
+        say("<strong><code>Pipe</code> returned, so the test passes in microseconds.</strong> " +
+            "The 2-second <code>time.After</code> was never reached. Notice that one copy is " +
+            "still asleep — <code>Pipe</code> returning is not the same as both copies " +
+            "finishing.", "good");
+      },
+      function () { log("deferred clientEnd.Close() — wakes the sleeping copy", "n"); closePeer("client"); }
+    ]);
+  });
+
+  reset();
+})();
+</script>
