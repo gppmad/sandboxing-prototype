@@ -8,8 +8,10 @@ import (
 	"github.com/gppmad/sandboxing-prototype/internal/relay"
 )
 
-// targetAddr is the fixed destination every accepted connection is forwarded to.
-const targetAddr = "example.com:80"
+// targetSocket is the Unix socket every accepted connection is bridged into.
+// A Unix socket is addressed by a filesystem path, not host:port — which is
+// what lets it cross into a process that has no network stack at all.
+const targetSocket = "/tmp/x.sock"
 
 func main() {
 	// The empty host in ":9001" binds all interfaces — 0.0.0.0 and [::].
@@ -19,7 +21,7 @@ func main() {
 	}
 	defer ln.Close()
 
-	fmt.Printf("listening on :9001, forwarding to %s\n", targetAddr)
+	fmt.Printf("listening on :9001, bridging into %s\n", targetSocket)
 
 	for {
 		conn, err := ln.Accept()
@@ -30,18 +32,22 @@ func main() {
 			continue
 		}
 		// One goroutine per connection so clients don't block each other.
-		go handleConn(conn, targetAddr)
+		go handleConn(conn, targetSocket)
 	}
 }
 
-// handleConn relays traffic between client and addr, so the client is
-// transparently talking to whatever is on the other end.
-func handleConn(client net.Conn, addr string) {
+// handleConn relays traffic between client and the Unix socket at path, so
+// the client is transparently talking to whatever is listening there.
+func handleConn(client net.Conn, path string) {
 	defer client.Close()
 
-	target, err := net.Dial("tcp", addr)
+	// Only the network changes from the TCP forwarder — relay.Pipe takes
+	// io.ReadWriteCloser, so it does not care which one this is.
+	// A missing socket file fails here with "no such file or directory",
+	// not the "connection refused" a dead TCP port gives you.
+	target, err := net.Dial("unix", path)
 	if err != nil {
-		log.Printf("dial %s: %v", addr, err)
+		log.Printf("dial %s: %v", path, err)
 		return
 	}
 	defer target.Close()
