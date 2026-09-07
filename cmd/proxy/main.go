@@ -58,6 +58,22 @@ func handleConn(client net.Conn) {
 	}
 	target := fields[1]
 
+	// The client sent more headers after the request line — Host,
+	// Proxy-Connection and friends — ending with a blank line. They are
+	// addressed to this proxy, so they have to be consumed here: whatever is
+	// left unread when the tunnel opens gets relayed to the target, which is
+	// waiting for a TLS handshake and would receive HTTP text instead.
+	for {
+		header, err := r.ReadString('\n')
+		if err != nil {
+			log.Printf("drain headers: %v", err)
+			return
+		}
+		if strings.TrimRight(header, "\r\n") == "" {
+			break // the blank line: the request ends, the tunnel payload begins
+		}
+	}
+
 	upstream, err := net.Dial("tcp", target)
 	if err != nil {
 		log.Printf("dial %s: %v", target, err)
