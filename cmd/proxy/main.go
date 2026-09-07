@@ -1,6 +1,6 @@
-// Command proxy is the beginnings of a CONNECT proxy. For now it only reads
-// the first line each client sends and prints it, to show that an HTTPS
-// client names its destination in cleartext before any TLS handshake starts.
+// Command proxy is a CONNECT proxy: it reads the destination an HTTPS client
+// names in cleartext, dials it, and then shuffles encrypted bytes between the
+// two without ever taking part in the TLS handshake.
 package main
 
 import (
@@ -9,6 +9,8 @@ import (
 	"log"
 	"net"
 	"strings"
+
+	"github.com/gppmad/sandboxing-prototype/internal/relay"
 )
 
 func main() {
@@ -30,21 +32,45 @@ func main() {
 	}
 }
 
-// handleConn prints the first line the client sent and hangs up. Nothing is
-// written back, so the client's request fails — the point here is only to
-// show what arrives, and in what form.
+// handleConn tunnels a client to whatever host it named in its CONNECT line.
+// Nothing here decrypts anything: once the tunnel is open this is the same
+// byte relay as the bridges, and the TLS handshake happens end to end between
+// the client and the real server.
 func handleConn(client net.Conn) {
 	defer client.Close()
 
-	// HTTP is line-oriented, so a bufio.Reader is the natural way to take
-	// exactly one line off the connection.
-	line, err := bufio.NewReader(client).ReadString('\n')
+	// The reader is kept rather than discarded: bufio pulls a whole chunk off
+	// the socket, so any header lines the client sent after the request line
+	// are already sitting in this buffer, not in the connection.
+	r := bufio.NewReader(client)
+
+	line, err := r.ReadString('\n')
 	if err != nil {
-		log.Printf("read first line: %v", err)
+		log.Printf("read request line: %v", err)
 		return
 	}
 
-	// Lines arrive CRLF-terminated. Trimming both keeps the print clean —
-	// a stray \r is invisible on screen but still there.
-	fmt.Printf("%s\n", strings.TrimRight(line, "\r\n"))
+	// "CONNECT host:port HTTP/1.1" — the target is the middle field.
+	fields := strings.Fields(strings.TrimRight(line, "\r\n"))
+	if len(fields) != 3 || fields[0] != "CONNECT" {
+		log.Printf("not a CONNECT request: %q", strings.TrimRight(line, "\r\n"))
+		return
+	}
+	target := fields[1]
+
+	upstream, err := net.Dial("tcp", target)
+	if err != nil {
+		log.Printf("dial %s: %v", target, err)
+		return
+	}
+	defer upstream.Close()
+
+	// The signal the client is waiting for before it starts its handshake.
+	if _, err := fmt.Fprint(client, "HTTP/1.1 200 Connection established\r\n\r\n"); err != nil {
+		log.Printf("write 200 to client: %v", err)
+		return
+	}
+
+	log.Printf("tunnel open: %s", target)
+	relay.Pipe(client, upstream)
 }
