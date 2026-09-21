@@ -82,6 +82,24 @@ func handleConn(client net.Conn) {
 		return
 	}
 
+	// The policy is about the host, not the port it was asked for.
+	// SplitHostPort rather than strings.Split: an IPv6 literal is full of
+	// colons and would not survive naive splitting.
+	host, _, err := net.SplitHostPort(target)
+	if err != nil {
+		log.Printf("malformed target %q: %v", target, err)
+		return
+	}
+
+	// This check has to happen here, before the dial. Refusing a host after
+	// connecting to it is not refusing it — the outbound connection already
+	// happened.
+	if !allowed(host) {
+		log.Printf("refused: %s", host)
+		fmt.Fprint(client, "HTTP/1.1 403 Forbidden\r\n\r\n")
+		return
+	}
+
 	upstream, err := net.Dial("tcp", target)
 	if err != nil {
 		log.Printf("dial %s: %v", target, err)
