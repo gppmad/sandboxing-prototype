@@ -14,7 +14,8 @@ import (
 )
 
 func main() {
-	ln, err := net.Listen("tcp", ":8080")
+	// IPv4 only, to match cmd/tcp2unix — see the note there.
+	ln, err := net.Listen("tcp4", ":8080")
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
@@ -87,7 +88,7 @@ func handleConn(client net.Conn) {
 	// colons and would not survive naive splitting.
 	host, _, err := net.SplitHostPort(target)
 	if err != nil {
-		log.Printf("malformed target %q: %v", target, err)
+		log.Printf("[proxy] malformed target %q: %v", target, err)
 		return
 	}
 
@@ -95,24 +96,26 @@ func handleConn(client net.Conn) {
 	// connecting to it is not refusing it — the outbound connection already
 	// happened.
 	if !allowed(host) {
-		log.Printf("refused: %s", host)
+		log.Printf("[proxy] CONNECT %s -> REFUSED", target)
 		fmt.Fprint(client, "HTTP/1.1 403 Forbidden\r\n\r\n")
 		return
 	}
 
+	log.Printf("[proxy] CONNECT %s -> ALLOWED", target)
+
 	upstream, err := net.Dial("tcp", target)
 	if err != nil {
-		log.Printf("dial %s: %v", target, err)
+		log.Printf("[proxy] dial %s: %v", target, err)
 		return
 	}
 	defer upstream.Close()
 
 	// The signal the client is waiting for before it starts its handshake.
 	if _, err := fmt.Fprint(client, "HTTP/1.1 200 Connection established\r\n\r\n"); err != nil {
-		log.Printf("write 200 to client: %v", err)
+		log.Printf("[proxy] write 200 to client: %v", err)
 		return
 	}
 
-	log.Printf("tunnel open: %s", target)
+	log.Printf("[proxy] tunnel established")
 	relay.Pipe(client, upstream)
 }

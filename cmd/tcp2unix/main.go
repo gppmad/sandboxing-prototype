@@ -14,10 +14,11 @@ import (
 const targetSocket = "/tmp/x.sock"
 
 func main() {
-	// The empty host in ":3128" binds all interfaces — 0.0.0.0 and [::].
-	// 3128 is Squid's default and the conventional port for an HTTP proxy,
-	// which is what this bridge now fronts.
-	ln, err := net.Listen("tcp", ":3128")
+	// "tcp4" rather than "tcp": the wildcard listener would otherwise be
+	// dual-stack, and clients try IPv6 first, so connections would arrive
+	// from [::1] instead of 127.0.0.1. 3128 is Squid's default and the
+	// conventional port for an HTTP proxy, which is what this bridge fronts.
+	ln, err := net.Listen("tcp4", ":3128")
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
@@ -42,6 +43,9 @@ func main() {
 // the client is transparently talking to whatever is listening there.
 func handleConn(client net.Conn, path string) {
 	defer client.Close()
+
+	log.Printf("[tcp2unix] accepted client from %s", client.RemoteAddr())
+	log.Printf("[tcp2unix] dialing socket %s", path)
 
 	// Only the network changes from the TCP forwarder — relay.Pipe takes
 	// io.ReadWriteCloser, so it does not care which one this is.

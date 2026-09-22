@@ -57,6 +57,9 @@ func main() {
 func handleConn(client net.Conn, addr string) {
 	defer client.Close()
 
+	log.Printf("[unix2tcp] accepted connection on %s", socketPath)
+	log.Printf("[unix2tcp] dialing proxy at %s", addr)
+
 	target, err := net.Dial("tcp", addr)
 	if err != nil {
 		log.Printf("dial %s: %v", addr, err)
