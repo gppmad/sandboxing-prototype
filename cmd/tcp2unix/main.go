@@ -14,14 +14,16 @@ import (
 const targetSocket = "/tmp/x.sock"
 
 func main() {
-	// The empty host in ":9001" binds all interfaces — 0.0.0.0 and [::].
-	ln, err := net.Listen("tcp", ":9001")
+	// The empty host in ":3128" binds all interfaces — 0.0.0.0 and [::].
+	// 3128 is Squid's default and the conventional port for an HTTP proxy,
+	// which is what this bridge now fronts.
+	ln, err := net.Listen("tcp", ":3128")
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
 	defer ln.Close()
 
-	fmt.Printf("listening on :9001, bridging into %s\n", targetSocket)
+	fmt.Printf("listening on :3128, bridging into %s\n", targetSocket)
 
 	for {
 		conn, err := ln.Accept()

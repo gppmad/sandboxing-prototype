@@ -18,8 +18,10 @@ const (
 	// cmd/tcp2unix dials, which is what lets the two chain together.
 	socketPath = "/tmp/x.sock"
 
-	// targetAddr is the real TCP destination every connection is forwarded to.
-	targetAddr = "example.com:80"
+	// targetAddr is the filtering proxy, not a website: this bridge hands
+	// whatever arrives on the socket to the thing that decides where it may
+	// actually go.
+	targetAddr = "localhost:8080"
 )
 
 func main() {
