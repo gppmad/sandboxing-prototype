@@ -21,21 +21,18 @@ import (
 	"time"
 )
 
-// The helpers are told socketPath and proxyAddr as arguments. bridgeAddr is
-// still fixed: it is where tcp2unix always listens.
-const (
-	socketPath = "/tmp/x.sock"
-	proxyAddr  = "127.0.0.1:8080"
-	bridgeAddr = "localhost:3128"
-)
+// bridgeAddr is where tcp2unix always listens. It can stay fixed: each run
+// has its own network namespace, so each has its own port 3128. The socket
+// and the proxy port, which live on the host, are picked fresh per run.
+const bridgeAddr = "localhost:3128"
 
 func main() {
 	// This binary runs twice. You start it on the host (outside), and it
 	// starts bwrap, which runs this same binary again within the wall with
 	// --inside prepended — that flag is how the second copy knows where it is.
 	//
-	//	sandbox --allow ... -- curl ...   → outside: start proxy + unix2tcp, then bwrap
-	//	sandbox --inside curl ...         → inside:  start tcp2unix, then curl
+	//	sandbox --allow ... -- curl ...     → outside: start proxy + unix2tcp, then bwrap
+	//	sandbox --inside <socket> curl ...  → inside:  start tcp2unix, then curl
 	//
 	// Either way the command's exit code becomes ours.
 	if len(os.Args) > 1 && os.Args[1] == "--inside" {
@@ -77,6 +74,20 @@ func (h *hostList) Set(v string) error { *h = append(*h, v); return nil }
 func outside(allowlist []string, command []string) int {
 	self := executable()
 
+	// A fresh directory per run, so two runs never share a socket. Explicitly
+	// under /tmp, which bwrap hides: inside, the socket is then visible only
+	// because of the --bind below. RemoveAll is deferred first so it runs
+	// last, after the helpers are stopped.
+	dir, err := os.MkdirTemp("/tmp", "sandbox-")
+	if err != nil {
+		log.Fatalf("create socket dir: %v", err)
+	}
+	defer os.RemoveAll(dir)
+	socketPath := filepath.Join(dir, "x.sock")
+
+	// A free port per run, so two proxies never collide.
+	proxyAddr := freeAddr()
+
 	// The filtering proxy: listens on proxyAddr and lets through only the
 	// hosts in allowlist. Started first, since unix2tcp forwards to it.
 	proxyArgs := append([]string{proxyAddr}, allowlist...)
@@ -100,18 +111,20 @@ func outside(allowlist []string, command []string) int {
 		"--dev-bind", "/", "/",
 		"--tmpfs", "/tmp",
 		"--bind", socketPath, socketPath,
-		self, "--inside",
+		self, "--inside", socketPath,
 	}
 	return run("bwrap", append(args, command...), os.Environ())
 }
 
 // inside runs within the wall: it starts the near side of the bridge, then
-// runs the user's command pointed at it.
-func inside(command []string) int {
-	if len(command) == 0 {
-		log.Print("sandbox --inside: no command given")
+// runs the user's command pointed at it. args is the socket path, then the
+// command.
+func inside(args []string) int {
+	if len(args) < 2 {
+		log.Print("usage: sandbox --inside <socket> <command> [args...]")
 		return 2
 	}
+	socketPath, command := args[0], args[1:]
 
 	self := executable()
 
@@ -138,6 +151,18 @@ func executable() string {
 		log.Fatalf("%s is under /tmp, which the sandbox hides; build with: go build -o bin/ ./cmd/...", self)
 	}
 	return self
+}
+
+// freeAddr returns a loopback address with a port nothing is using: the
+// kernel picks one for port 0, and we release it for the proxy to take.
+// Something else could grab it in between; unlikely enough for the MVP.
+func freeAddr() string {
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		log.Fatalf("find a free port: %v", err)
+	}
+	defer ln.Close()
+	return ln.Addr().String()
 }
 
 // start launches a helper program in the background. Its output is dropped so
