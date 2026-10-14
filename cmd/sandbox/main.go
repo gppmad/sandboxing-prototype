@@ -1,14 +1,15 @@
 //go:build linux
 
 // Command sandbox runs a command with no network, except through the
-// filtering proxy — F2's manual setup, automated.
+// filtering proxy, which lets it reach only the hosts given with --allow.
 //
-//	sandbox curl https://example.com     → works
-//	sandbox curl https://wikipedia.org   → refused
+//	sandbox --allow example.com -- curl https://example.com     → works
+//	sandbox --allow example.com -- curl https://wikipedia.org   → refused
 package main
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"log"
 	"net"
@@ -28,33 +29,56 @@ const (
 )
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: sandbox <command> [args...]")
-		os.Exit(2)
-	}
-
 	// This binary runs twice. You start it on the host (outside), and it
 	// starts bwrap, which runs this same binary again within the wall with
 	// --inside prepended — that flag is how the second copy knows where it is.
 	//
-	//	sandbox curl ...             → outside: start proxy + unix2tcp, then bwrap
-	//	sandbox --inside curl ...    → inside:  start tcp2unix, then curl
+	//	sandbox --allow ... -- curl ...   → outside: start proxy + unix2tcp, then bwrap
+	//	sandbox --inside curl ...         → inside:  start tcp2unix, then curl
 	//
 	// Either way the command's exit code becomes ours.
-	if os.Args[1] == "--inside" {
+	if len(os.Args) > 1 && os.Args[1] == "--inside" {
 		os.Exit(inside(os.Args[2:]))
 	}
-	os.Exit(outside(os.Args[1:]))
+
+	// flag stops reading at "--" or at the first word that isn't a flag, so
+	// the command's own flags (curl -v ...) are left alone.
+	var allowlist hostList
+	flag.Var(&allowlist, "allow", "a host the command may reach (repeatable)")
+	flag.Usage = func() {
+		fmt.Fprintln(os.Stderr, "usage: sandbox [--allow host]... -- <command> [args...]")
+		flag.PrintDefaults()
+	}
+	flag.Parse()
+	command := flag.Args()
+	if len(command) == 0 {
+		flag.Usage()
+		os.Exit(2)
+	}
+
+	// The proxy's own log is dropped (see start), so say it here.
+	if len(allowlist) == 0 {
+		fmt.Fprintln(os.Stderr, "sandbox: no --allow given, all network access will be refused")
+	}
+
+	os.Exit(outside(allowlist, command))
 }
+
+// hostList collects every --allow into one list. flag calls Set once per
+// occurrence of the flag.
+type hostList []string
+
+func (h *hostList) String() string     { return strings.Join(*h, ",") }
+func (h *hostList) Set(v string) error { *h = append(*h, v); return nil }
 
 // outside runs on the host: it starts the proxy and the far side of the
 // bridge, then re-runs this binary inside bwrap.
-func outside(command []string) int {
+func outside(allowlist []string, command []string) int {
 	self := executable()
 
-	// The filtering proxy: decides which hosts may be reached.
-	// Started first, since unix2tcp forwards to it.
-	proxy := start(filepath.Join(filepath.Dir(self), "proxy"))
+	// The filtering proxy: lets through only the hosts in allowlist, which
+	// it gets as its arguments. Started first, since unix2tcp forwards to it.
+	proxy := start(filepath.Join(filepath.Dir(self), "proxy"), allowlist...)
 	defer proxy.Process.Kill() // stop it when sandbox returns
 	waitFor("tcp", proxyAddr)  // don't go on until it accepts connections
 
@@ -116,8 +140,8 @@ func executable() string {
 
 // start launches a helper program in the background. Its output is dropped so
 // it does not mix with the user's command.
-func start(path string) *exec.Cmd {
-	cmd := exec.Command(path)
+func start(path string, args ...string) *exec.Cmd {
+	cmd := exec.Command(path, args...)
 	// If sandbox dies, even from a crash, the kernel kills the helper too.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
 	if err := cmd.Start(); err != nil {
