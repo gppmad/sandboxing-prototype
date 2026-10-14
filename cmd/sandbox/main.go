@@ -15,6 +15,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -26,7 +27,18 @@ import (
 // and the proxy port, which live on the host, are picked fresh per run.
 const bridgeAddr = "localhost:3128"
 
+// signals receives Ctrl+C (SIGINT) and SIGTERM. Without this, Go's default is
+// to die on the spot, skipping every defer: helpers would be left to
+// Pdeathsig and the socket directory would stay behind. run forwards what
+// arrives here to the command instead, and cleanup happens on the normal path
+// once the command exits.
+var signals = make(chan os.Signal, 1)
+
 func main() {
+	// Registered first, so a Ctrl+C during setup is caught too. It is then
+	// held in the channel and passed on as soon as the command starts.
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+
 	// This binary runs twice. You start it on the host (outside), and it
 	// starts bwrap, which runs this same binary again within the wall with
 	// --inside prepended — that flag is how the second copy knows where it is.
@@ -199,15 +211,33 @@ func run(name string, args []string, env []string) int {
 	// Same as the helpers: if sandbox dies, the command dies with it.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
 
-	err := cmd.Run()
+	if err := cmd.Start(); err != nil {
+		log.Printf("%s: %v", name, err) // e.g. command not found
+		return 1
+	}
+
+	// Pass signals on to the command and let it decide how to end. On Ctrl+C
+	// the terminal has usually signalled it already; a second SIGINT does no
+	// harm, and covers a "kill -INT" aimed at sandbox alone.
+	go func() {
+		for sig := range signals {
+			cmd.Process.Signal(sig)
+		}
+	}()
+
+	err := cmd.Wait()
 	var exitErr *exec.ExitError
 	switch {
 	case err == nil:
 		return 0
 	case errors.As(err, &exitErr) && exitErr.ExitCode() > 0:
 		return exitErr.ExitCode()
+	case errors.As(err, &exitErr):
+		// Killed by a signal (ExitCode is -1 then). Report it the way shells
+		// do, 128 + signal number: 130 for Ctrl+C.
+		status := exitErr.Sys().(syscall.WaitStatus)
+		return 128 + int(status.Signal())
 	default:
-		// Not found, or killed by a signal (ExitCode is -1 then).
 		log.Printf("%s: %v", name, err)
 		return 1
 	}
