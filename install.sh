@@ -1,6 +1,6 @@
 #!/bin/sh
 # Installs sandbox: checks for bwrap and Go, installs whichever is missing,
-# then builds sandbox and its three helpers into ~/go/bin (or $GOBIN).
+# then builds sandbox and its three helpers into ~/.local/bin.
 #
 #   sh install.sh
 set -e
@@ -56,18 +56,27 @@ if [ "$minor" -lt 21 ]; then
 fi
 
 # Build all four programs into the same folder: sandbox finds its helpers
-# next to itself.
+# next to itself. ~/.local/bin rather than Go's default ~/go/bin, because
+# most distros already put it on PATH. Running this again overwrites them.
+bin="$HOME/.local/bin"
+mkdir -p "$bin"
 echo "Building sandbox..."
-go install github.com/gppmad/sandboxing-prototype/cmd/...@latest
-
-bin=$(go env GOBIN)
-[ -z "$bin" ] && bin="$(go env GOPATH)/bin"
+GOBIN="$bin" go install github.com/gppmad/sandboxing-prototype/cmd/...@latest
 echo "Installed into $bin"
 
-# Only a hint: changing the user's shell config is left to them.
+# Rocky/Fedora already have ~/.local/bin on PATH. Debian/Ubuntu add it at
+# login, but only if the folder existed then, so a new terminal is enough.
+# Elsewhere, say exactly what to add; the user's shell config is theirs to edit.
 case ":$PATH:" in
 *":$bin:"*) ;;
-*) echo "Add it to your PATH: export PATH=\"\$PATH:$bin\"" ;;
+*)
+	if grep -qs '\.local/bin' "$HOME/.profile" "$HOME/.bash_profile" "$HOME/.bashrc"; then
+		echo "Open a new terminal to have sandbox on your PATH."
+	else
+		echo "$bin is not on your PATH. Add this line to ~/.bashrc, then open a new terminal:"
+		echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+	fi
+	;;
 esac
 
 echo "Try it: sandbox --allow example.com -- curl https://example.com"
