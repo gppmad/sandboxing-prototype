@@ -1,6 +1,10 @@
 // Command proxy is a CONNECT proxy: it reads the destination an HTTPS client
 // names in cleartext, dials it, and then shuffles encrypted bytes between the
 // two without ever taking part in the TLS handshake.
+//
+// The hosts it may tunnel to are its arguments; with none, it refuses all:
+//
+//	proxy example.com github.com
 package main
 
 import (
@@ -8,12 +12,15 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"strings"
 
 	"github.com/gppmad/sandboxing-prototype/internal/relay"
 )
 
 func main() {
+	allowlist := os.Args[1:]
+
 	// IPv4 only, to match cmd/tcp2unix — see the note there.
 	ln, err := net.Listen("tcp4", ":8080")
 	if err != nil {
@@ -21,7 +28,7 @@ func main() {
 	}
 	defer ln.Close()
 
-	fmt.Println("listening on :8080")
+	fmt.Printf("listening on :8080, allowing %v\n", allowlist)
 
 	for {
 		conn, err := ln.Accept()
@@ -29,7 +36,7 @@ func main() {
 			log.Printf("accept error: %v", err)
 			continue
 		}
-		go handleConn(conn)
+		go handleConn(conn, allowlist)
 	}
 }
 
@@ -65,11 +72,12 @@ func readConnect(r *bufio.Reader) (string, error) {
 	return fields[1], nil
 }
 
-// handleConn tunnels a client to whatever host it named in its CONNECT line.
+// handleConn tunnels a client to the host it named in its CONNECT line, if
+// that host is in the allowlist.
 // Nothing here decrypts anything: once the tunnel is open this is the same
 // byte relay as the bridges, and the TLS handshake happens end to end between
 // the client and the real server.
-func handleConn(client net.Conn) {
+func handleConn(client net.Conn, allowlist []string) {
 	defer client.Close()
 
 	// The reader is kept rather than discarded: bufio pulls a whole chunk off
@@ -95,7 +103,7 @@ func handleConn(client net.Conn) {
 	// This check has to happen here, before the dial. Refusing a host after
 	// connecting to it is not refusing it — the outbound connection already
 	// happened.
-	if !allowed(host) {
+	if !allowed(host, allowlist) {
 		log.Printf("[proxy] CONNECT %s -> REFUSED", target)
 		fmt.Fprint(client, "HTTP/1.1 403 Forbidden\r\n\r\n")
 		return
