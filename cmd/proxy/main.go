@@ -2,9 +2,10 @@
 // names in cleartext, dials it, and then shuffles encrypted bytes between the
 // two without ever taking part in the TLS handshake.
 //
-// The hosts it may tunnel to are its arguments; with none, it refuses all:
+// It listens on the address in its first argument. The hosts it may tunnel
+// to are the rest; with none, it refuses all:
 //
-//	proxy example.com github.com
+//	proxy 127.0.0.1:8080 example.com github.com
 package main
 
 import (
@@ -19,16 +20,23 @@ import (
 )
 
 func main() {
-	allowlist := os.Args[1:]
+	if len(os.Args) < 2 {
+		fmt.Fprintln(os.Stderr, "usage: proxy <listen addr> [allowed host]...")
+		os.Exit(2)
+	}
+	// Pass a loopback address such as 127.0.0.1:8080. A bare ":8080" would
+	// listen on every interface and make this an open proxy for the network.
+	addr := os.Args[1]
+	allowlist := os.Args[2:]
 
 	// IPv4 only, to match cmd/tcp2unix — see the note there.
-	ln, err := net.Listen("tcp4", ":8080")
+	ln, err := net.Listen("tcp4", addr)
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
 	}
 	defer ln.Close()
 
-	fmt.Printf("listening on :8080, allowing %v\n", allowlist)
+	fmt.Printf("listening on %s, allowing %v\n", addr, allowlist)
 
 	for {
 		conn, err := ln.Accept()

@@ -1,19 +1,28 @@
+// Command tcp2unix is the near side of the bridge: it listens on TCP port
+// 3128 and forwards every connection into a Unix socket.
+//
+//	tcp2unix /tmp/x.sock
 package main
 
 import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 
 	"github.com/gppmad/sandboxing-prototype/internal/relay"
 )
 
-// targetSocket is the Unix socket every accepted connection is bridged into.
-// A Unix socket is addressed by a filesystem path, not host:port — which is
-// what lets it cross into a process that has no network stack at all.
-const targetSocket = "/tmp/x.sock"
-
 func main() {
+	if len(os.Args) != 2 {
+		fmt.Fprintln(os.Stderr, "usage: tcp2unix <socket>")
+		os.Exit(2)
+	}
+	// targetSocket is the Unix socket every accepted connection is bridged
+	// into. A Unix socket is addressed by a filesystem path, not host:port —
+	// which is what lets it cross into a process that has no network stack.
+	targetSocket := os.Args[1]
+
 	// "tcp4" rather than "tcp": the wildcard listener would otherwise be
 	// dual-stack, and clients try IPv6 first, so connections would arrive
 	// from [::1] instead of 127.0.0.1. 3128 is Squid's default and the

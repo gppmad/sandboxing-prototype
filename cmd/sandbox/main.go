@@ -21,10 +21,11 @@ import (
 	"time"
 )
 
-// These have to match the constants in the three programs we start.
+// The helpers are told socketPath and proxyAddr as arguments. bridgeAddr is
+// still fixed: it is where tcp2unix always listens.
 const (
 	socketPath = "/tmp/x.sock"
-	proxyAddr  = "localhost:8080"
+	proxyAddr  = "127.0.0.1:8080"
 	bridgeAddr = "localhost:3128"
 )
 
@@ -76,15 +77,16 @@ func (h *hostList) Set(v string) error { *h = append(*h, v); return nil }
 func outside(allowlist []string, command []string) int {
 	self := executable()
 
-	// The filtering proxy: lets through only the hosts in allowlist, which
-	// it gets as its arguments. Started first, since unix2tcp forwards to it.
-	proxy := start(filepath.Join(filepath.Dir(self), "proxy"), allowlist...)
+	// The filtering proxy: listens on proxyAddr and lets through only the
+	// hosts in allowlist. Started first, since unix2tcp forwards to it.
+	proxyArgs := append([]string{proxyAddr}, allowlist...)
+	proxy := start(filepath.Join(filepath.Dir(self), "proxy"), proxyArgs...)
 	defer proxy.Process.Kill() // stop it when sandbox returns
 	waitFor("tcp", proxyAddr)  // don't go on until it accepts connections
 
 	// The host end of the bridge: listens on the socket that bwrap
 	// will bind into the sandbox, and forwards to the proxy.
-	unix2tcp := start(filepath.Join(filepath.Dir(self), "unix2tcp"))
+	unix2tcp := start(filepath.Join(filepath.Dir(self), "unix2tcp"), socketPath, proxyAddr)
 	defer unix2tcp.Process.Kill()
 	waitFor("unix", socketPath) // the socket must exist before bwrap binds it
 
@@ -113,7 +115,7 @@ func inside(command []string) int {
 
 	self := executable()
 
-	tcp2unix := start(filepath.Join(filepath.Dir(self), "tcp2unix"))
+	tcp2unix := start(filepath.Join(filepath.Dir(self), "tcp2unix"), socketPath)
 	defer tcp2unix.Process.Kill()
 	waitFor("tcp", bridgeAddr)
 
