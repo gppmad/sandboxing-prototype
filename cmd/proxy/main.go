@@ -72,10 +72,38 @@ func handleConn(client net.Conn, allowlist []string) {
 		return
 	}
 
-	// Plain HTTP (`GET http://host/path`) is not forwarded yet.
-	log.Printf("[proxy] %s %s -> REFUSED (plain HTTP not supported yet)", req.Method, req.URL)
-	const msg = "plain HTTP is not supported; use HTTPS (CONNECT)\n"
-	fmt.Fprintf(client, "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", len(msg), msg)
+	handleHTTP(client, req, allowlist)
+}
+
+// respond writes a small plain-text response and tells the client we are done.
+func respond(client net.Conn, code int, msg string) {
+	fmt.Fprintf(client, "HTTP/1.1 %d %s\r\nContent-Type: text/plain\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s",
+		code, http.StatusText(code), len(msg), msg)
+}
+
+// handleHTTP serves a plain HTTP proxy request (`GET http://host/path`) if the
+// host in its URL is in the allowlist.
+func handleHTTP(client net.Conn, req *http.Request, allowlist []string) {
+	// A proxy request names its destination in the URL. `GET /` has no host in
+	// it, so it is a request to this proxy itself, not through it.
+	if !req.URL.IsAbs() {
+		log.Printf("[proxy] %s %s -> BAD REQUEST (not an absolute URL)", req.Method, req.URL)
+		respond(client, http.StatusBadRequest, "proxy requests need an absolute URL\n")
+		return
+	}
+
+	// Same rule as CONNECT, and again before anything is dialed.
+	host := req.URL.Hostname()
+	if !allowed(host, allowlist) {
+		log.Printf("[proxy] %s %s -> REFUSED", req.Method, req.URL)
+		respond(client, http.StatusForbidden, "host not allowed: "+host+"\n")
+		return
+	}
+
+	log.Printf("[proxy] %s %s -> ALLOWED", req.Method, req.URL)
+
+	// Forwarding comes in the next steps.
+	respond(client, http.StatusNotImplemented, "forwarding plain HTTP is not implemented yet\n")
 }
 
 // handleConnect tunnels a client to target (host:port) if the host is in the

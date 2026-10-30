@@ -73,14 +73,46 @@ func TestConnectRefusesHostNotInAllowlist(t *testing.T) {
 	}
 }
 
-// Plain HTTP is refused with a 403 until forwarding exists.
-func TestPlainHTTPRefusedWith403(t *testing.T) {
+func TestPlainHTTPRefusesHostNotInAllowlist(t *testing.T) {
 	c := serve([]string{"example.com"})
+	defer c.Close()
+	go fmt.Fprint(c, "GET http://evil.com/ HTTP/1.1\r\nHost: evil.com\r\n\r\n")
+
+	if got := status(t, c); got != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", got)
+	}
+}
+
+// With an empty allowlist everything is refused (default deny).
+func TestPlainHTTPRefusedWithEmptyAllowlist(t *testing.T) {
+	c := serve(nil)
 	defer c.Close()
 	go fmt.Fprint(c, "GET http://example.com/ HTTP/1.1\r\nHost: example.com\r\n\r\n")
 
 	if got := status(t, c); got != http.StatusForbidden {
 		t.Errorf("status = %d, want 403", got)
+	}
+}
+
+// The policy is about the host, so a port in the URL does not change it.
+func TestPlainHTTPAllowedHostPassesTheFilter(t *testing.T) {
+	c := serve([]string{"example.com"})
+	defer c.Close()
+	go fmt.Fprint(c, "GET http://example.com:8080/x HTTP/1.1\r\nHost: example.com:8080\r\n\r\n")
+
+	// 501 until forwarding exists: anything but 403 means the filter let it by.
+	if got := status(t, c); got != http.StatusNotImplemented {
+		t.Errorf("status = %d, want 501", got)
+	}
+}
+
+func TestPlainHTTPNeedsAbsoluteURL(t *testing.T) {
+	c := serve([]string{"example.com"})
+	defer c.Close()
+	go fmt.Fprint(c, "GET /path HTTP/1.1\r\nHost: example.com\r\n\r\n")
+
+	if got := status(t, c); got != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", got)
 	}
 }
 
