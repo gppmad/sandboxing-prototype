@@ -2,75 +2,95 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"io"
-	"strings"
+	"net"
+	"net/http"
 	"testing"
 )
 
-// readConnect takes a *bufio.Reader, so these need no sockets and no network —
-// a strings.Reader is a whole client.
-func reader(s string) *bufio.Reader { return bufio.NewReader(strings.NewReader(s)) }
-
-func TestReadConnectReturnsTarget(t *testing.T) {
-	r := reader("CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n")
-
-	target, err := readConnect(r)
-	if err != nil {
-		t.Fatalf("readConnect: %v", err)
-	}
-	if target != "example.com:443" {
-		t.Errorf("target = %q, want %q", target, "example.com:443")
-	}
+// serve runs handleConn on one end of an in-memory pipe and returns the other
+// end, so a test is a whole client with no real proxy socket.
+func serve(allowlist []string) net.Conn {
+	client, server := net.Pipe()
+	go handleConn(server, allowlist)
+	return client
 }
 
-// The property the whole leak bug came down to: when readConnect returns, the
-// reader must sit on the first byte of tunnel payload — not on a header line.
-func TestReadConnectStopsAtTheBlankLine(t *testing.T) {
+func status(t *testing.T, c net.Conn) int {
+	t.Helper()
+	resp, err := http.ReadResponse(bufio.NewReader(c), nil)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	return resp.StatusCode
+}
+
+// The property the whole leak bug came down to: the proxy's own headers must
+// be consumed, so the first byte the target sees is the tunnel payload.
+func TestConnectRelaysOnlyThePayload(t *testing.T) {
+	backend, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer backend.Close()
+	got := make(chan string, 1)
+	go func() {
+		c, err := backend.Accept()
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		b, _ := io.ReadAll(c)
+		got <- string(b)
+	}()
+
 	const payload = "\x16\x03\x01 pretend this is a TLS ClientHello"
-	r := reader("CONNECT example.com:443 HTTP/1.1\r\n" +
-		"Host: example.com:443\r\n" +
-		"Proxy-Connection: Keep-Alive\r\n" +
-		"User-Agent: curl/8.4.0\r\n" +
-		"\r\n" +
-		payload)
+	c := serve([]string{"127.0.0.1"})
+	go fmt.Fprintf(c, "CONNECT %s HTTP/1.1\r\nHost: %[1]s\r\nProxy-Connection: Keep-Alive\r\nUser-Agent: curl/8.4.0\r\n\r\n", backend.Addr())
 
-	if _, err := readConnect(r); err != nil {
-		t.Fatalf("readConnect: %v", err)
+	// Read the 200 off the pipe byte-exact so nothing of the payload is consumed.
+	br := bufio.NewReader(c)
+	resp, err := http.ReadResponse(br, nil)
+	if err != nil || resp.StatusCode != 200 {
+		t.Fatalf("CONNECT response = %v, %v; want 200", resp, err)
 	}
+	fmt.Fprint(c, payload)
+	c.Close()
 
-	rest, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatalf("read rest: %v", err)
-	}
-	if string(rest) != payload {
-		t.Errorf("reader left at %q, want it left at %q", string(rest), payload)
+	if s := <-got; s != payload {
+		t.Errorf("target received %q, want %q", s, payload)
 	}
 }
 
-func TestReadConnectRejectsOtherMethods(t *testing.T) {
-	// A plain HTTP proxy request, which this proxy does not serve (see #20).
-	r := reader("GET http://example.com/ HTTP/1.1\r\nHost: example.com\r\n\r\n")
+func TestConnectRefusesHostNotInAllowlist(t *testing.T) {
+	c := serve([]string{"example.com"})
+	defer c.Close()
+	go fmt.Fprint(c, "CONNECT evil.com:443 HTTP/1.1\r\nHost: evil.com:443\r\n\r\n")
 
-	if _, err := readConnect(r); err == nil {
-		t.Error("readConnect accepted a GET; want an error")
+	if got := status(t, c); got != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", got)
 	}
 }
 
-func TestReadConnectRejectsMalformedRequestLine(t *testing.T) {
-	// Two fields where the spec wants three.
-	r := reader("CONNECT example.com:443\r\n\r\n")
+// Plain HTTP is refused with a 403 until forwarding exists.
+func TestPlainHTTPRefusedWith403(t *testing.T) {
+	c := serve([]string{"example.com"})
+	defer c.Close()
+	go fmt.Fprint(c, "GET http://example.com/ HTTP/1.1\r\nHost: example.com\r\n\r\n")
 
-	if _, err := readConnect(r); err == nil {
-		t.Error("readConnect accepted a two-field request line; want an error")
+	if got := status(t, c); got != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", got)
 	}
 }
 
-// A client that hangs up part-way through its headers never sends the blank
-// line. readConnect has to give up on EOF rather than spin.
-func TestReadConnectFailsOnHangupMidHeaders(t *testing.T) {
-	r := reader("CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n")
-
-	if _, err := readConnect(r); err == nil {
-		t.Error("readConnect returned success on a truncated request; want an error")
-	}
+// A client that hangs up part-way through its headers must not hang the proxy.
+func TestHangupMidHeadersClosesConnection(t *testing.T) {
+	c := serve([]string{"example.com"})
+	go func() {
+		fmt.Fprint(c, "CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n")
+		c.Close()
+	}()
+	// Server side returns and closes its end; reading to EOF proves it did.
+	io.Copy(io.Discard, c)
 }

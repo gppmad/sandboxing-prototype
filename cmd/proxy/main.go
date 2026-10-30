@@ -13,8 +13,8 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"os"
-	"strings"
 
 	"github.com/gppmad/sandboxing-prototype/internal/relay"
 )
@@ -48,56 +48,42 @@ func main() {
 	}
 }
 
-// readConnect reads one CONNECT request off r and returns the host:port it
-// names. It consumes the request line and every header line after it, leaving
-// r positioned exactly at the first byte of tunnel payload — which is what
-// keeps proxy headers from being relayed to a target expecting a handshake.
-func readConnect(r *bufio.Reader) (string, error) {
-	line, err := r.ReadString('\n')
-	if err != nil {
-		return "", fmt.Errorf("read request line: %w", err)
-	}
-
-	// "CONNECT host:port HTTP/1.1" — the target is the middle field.
-	fields := strings.Fields(strings.TrimRight(line, "\r\n"))
-	if len(fields) != 3 || fields[0] != "CONNECT" {
-		return "", fmt.Errorf("not a CONNECT request: %q", strings.TrimRight(line, "\r\n"))
-	}
-
-	// The headers after the request line — Host, Proxy-Connection and friends
-	// — are addressed to this proxy and end at a blank line. Consuming them is
-	// what moves r past the HTTP part of the stream.
-	for {
-		header, err := r.ReadString('\n')
-		if err != nil {
-			return "", fmt.Errorf("drain headers: %w", err)
-		}
-		if strings.TrimRight(header, "\r\n") == "" {
-			break // the blank line: the request ends, the tunnel payload begins
-		}
-	}
-
-	return fields[1], nil
-}
-
-// handleConn tunnels a client to the host it named in its CONNECT line, if
-// that host is in the allowlist.
-// Nothing here decrypts anything: once the tunnel is open this is the same
-// byte relay as the bridges, and the TLS handshake happens end to end between
-// the client and the real server.
+// handleConn reads one request off the client and dispatches on its method:
+// CONNECT opens a tunnel, anything else is a plain HTTP proxy request.
 func handleConn(client net.Conn, allowlist []string) {
 	defer client.Close()
 
 	// The reader is kept rather than discarded: bufio pulls a whole chunk off
-	// the socket, so header lines the client sent after the request line are
-	// already sitting in this buffer, not in the connection.
+	// the socket, so anything the client sent after the headers is already
+	// sitting in this buffer, not in the connection.
 	r := bufio.NewReader(client)
 
-	target, err := readConnect(r)
+	// ReadRequest consumes the request line and every header up to the blank
+	// line, leaving r at the first byte of whatever follows — for CONNECT,
+	// the tunnel payload.
+	req, err := http.ReadRequest(r)
 	if err != nil {
-		log.Print(err)
+		log.Printf("[proxy] read request: %v", err)
 		return
 	}
+
+	if req.Method == http.MethodConnect {
+		handleConnect(client, req.Host, allowlist)
+		return
+	}
+
+	// Plain HTTP (`GET http://host/path`) is not forwarded yet.
+	log.Printf("[proxy] %s %s -> REFUSED (plain HTTP not supported yet)", req.Method, req.URL)
+	const msg = "plain HTTP is not supported; use HTTPS (CONNECT)\n"
+	fmt.Fprintf(client, "HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", len(msg), msg)
+}
+
+// handleConnect tunnels a client to target (host:port) if the host is in the
+// allowlist.
+// Nothing here decrypts anything: once the tunnel is open this is the same
+// byte relay as the bridges, and the TLS handshake happens end to end between
+// the client and the real server.
+func handleConnect(client net.Conn, target string, allowlist []string) {
 
 	// The policy is about the host, not the port it was asked for.
 	// SplitHostPort rather than strings.Split: an IPv6 literal is full of
