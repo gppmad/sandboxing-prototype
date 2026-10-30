@@ -146,7 +146,14 @@ func inside(args []string) int {
 
 	// Run the command as a child rather than exec'ing it: exec would replace
 	// this process, and tcp2unix would lose the parent that cleans it up.
-	env := append(os.Environ(), "HTTPS_PROXY=http://"+bridgeAddr)
+	// Both schemes go through the proxy. curl only reads the lowercase
+	// http_proxy, so that one is set as well.
+	proxyURL := "http://" + bridgeAddr
+	env := append(os.Environ(),
+		"HTTPS_PROXY="+proxyURL,
+		"HTTP_PROXY="+proxyURL,
+		"http_proxy="+proxyURL,
+	)
 	return run(command[0], command[1:], env)
 }
 
