@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -94,15 +95,95 @@ func TestPlainHTTPRefusedWithEmptyAllowlist(t *testing.T) {
 	}
 }
 
-// The policy is about the host, so a port in the URL does not change it.
-func TestPlainHTTPAllowedHostPassesTheFilter(t *testing.T) {
-	c := serve([]string{"example.com"})
-	defer c.Close()
-	go fmt.Fprint(c, "GET http://example.com:8080/x HTTP/1.1\r\nHost: example.com:8080\r\n\r\n")
+// The whole point: an allowed host's response comes back to the client as is.
+func TestPlainHTTPRelaysTheResponse(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Backend", "yes")
+		w.WriteHeader(http.StatusTeapot)
+		fmt.Fprint(w, "short and stout")
+	}))
+	defer backend.Close()
 
-	// 501 until forwarding exists: anything but 403 means the filter let it by.
-	if got := status(t, c); got != http.StatusNotImplemented {
-		t.Errorf("status = %d, want 501", got)
+	c := serve([]string{"127.0.0.1"})
+	defer c.Close()
+	go fmt.Fprintf(c, "GET %s/x HTTP/1.1\r\nHost: %s\r\n\r\n", backend.URL, backend.Listener.Addr())
+
+	resp, err := http.ReadResponse(bufio.NewReader(c), nil)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusTeapot || string(body) != "short and stout" || resp.Header.Get("X-Backend") != "yes" {
+		t.Errorf("got %d %q X-Backend=%q; want the backend's own response",
+			resp.StatusCode, body, resp.Header.Get("X-Backend"))
+	}
+}
+
+// POST bodies must make it to the backend too.
+func TestPlainHTTPForwardsRequestBody(t *testing.T) {
+	got := make(chan string, 1)
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		got <- string(b)
+	}))
+	defer backend.Close()
+
+	c := serve([]string{"127.0.0.1"})
+	defer c.Close()
+	go fmt.Fprintf(c, "POST %s/ HTTP/1.1\r\nHost: %s\r\nContent-Length: 5\r\n\r\nhello", backend.URL, backend.Listener.Addr())
+	status(t, c)
+
+	if b := <-got; b != "hello" {
+		t.Errorf("backend received body %q, want hello", b)
+	}
+}
+
+// The backend must receive an ordinary origin-form request: the path and the
+// client's own headers, but nothing that was addressed to the proxy.
+func TestPlainHTTPForwardsRequestWithoutProxyHeaders(t *testing.T) {
+	got := make(chan *http.Request, 1)
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got <- r
+	}))
+	defer backend.Close()
+
+	c := serve([]string{"127.0.0.1"})
+	defer c.Close()
+	go fmt.Fprintf(c, "GET %s/hello?x=1 HTTP/1.1\r\nHost: %s\r\n"+
+		"Proxy-Connection: Keep-Alive\r\nProxy-Authorization: Basic c2VjcmV0\r\n"+
+		"Connection: X-Secret\r\nX-Secret: hunter2\r\nX-Keep: yes\r\n\r\n",
+		backend.URL, backend.Listener.Addr())
+	status(t, c) // wait until the proxy is done with the request
+
+	r := <-got
+	if r.RequestURI != "/hello?x=1" {
+		t.Errorf("backend saw %q, want /hello?x=1", r.RequestURI)
+	}
+	for _, h := range []string{"Proxy-Connection", "Proxy-Authorization", "X-Secret"} {
+		if v := r.Header.Get(h); v != "" {
+			t.Errorf("backend received %s: %q", h, v)
+		}
+	}
+	if r.Header.Get("X-Keep") != "yes" {
+		t.Error("an ordinary header was dropped")
+	}
+}
+
+func TestPlainHTTPUnreachableHostGets502(t *testing.T) {
+	// Take a free port, then close it so nothing is listening there.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	ln.Close()
+
+	c := serve([]string{"127.0.0.1"})
+	defer c.Close()
+	go fmt.Fprintf(c, "GET http://%s/ HTTP/1.1\r\nHost: %[1]s\r\n\r\n", addr)
+
+	if got := status(t, c); got != http.StatusBadGateway {
+		t.Errorf("status = %d, want 502", got)
 	}
 }
 

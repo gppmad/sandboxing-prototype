@@ -1,11 +1,19 @@
-// Command proxy is a CONNECT proxy: it reads the destination an HTTPS client
-// names in cleartext, dials it, and then shuffles encrypted bytes between the
-// two without ever taking part in the TLS handshake.
+// Command proxy is a filtering HTTP proxy. It serves two kinds of request:
 //
-// It listens on the address in its first argument. The hosts it may tunnel
-// to are the rest; with none, it refuses all:
+//   - CONNECT (HTTPS): it reads the destination the client names in cleartext,
+//     dials it, and then shuffles encrypted bytes between the two without ever
+//     taking part in the TLS handshake.
+//   - plain HTTP (`GET http://host/path`): it reads the request, forwards it to
+//     the host in the URL, and relays the response back.
+//
+// Both go through the same allowlist, checked before anything is dialed.
+//
+// Usage: proxy <listen addr> [allowed host]...
 //
 //	proxy 127.0.0.1:8080 example.com github.com
+//	      └─ listen addr ┘ └──── allowed hosts ────┘
+//
+// With no allowed hosts, it refuses everything.
 package main
 
 import (
@@ -15,6 +23,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/gppmad/sandboxing-prototype/internal/relay"
 )
@@ -75,12 +84,6 @@ func handleConn(client net.Conn, allowlist []string) {
 	handleHTTP(client, req, allowlist)
 }
 
-// respond writes a small plain-text response and tells the client we are done.
-func respond(client net.Conn, code int, msg string) {
-	fmt.Fprintf(client, "HTTP/1.1 %d %s\r\nContent-Type: text/plain\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s",
-		code, http.StatusText(code), len(msg), msg)
-}
-
 // handleHTTP serves a plain HTTP proxy request (`GET http://host/path`) if the
 // host in its URL is in the allowlist.
 func handleHTTP(client net.Conn, req *http.Request, allowlist []string) {
@@ -88,7 +91,7 @@ func handleHTTP(client net.Conn, req *http.Request, allowlist []string) {
 	// it, so it is a request to this proxy itself, not through it.
 	if !req.URL.IsAbs() {
 		log.Printf("[proxy] %s %s -> BAD REQUEST (not an absolute URL)", req.Method, req.URL)
-		respond(client, http.StatusBadRequest, "proxy requests need an absolute URL\n")
+		fmt.Fprint(client, "HTTP/1.1 400 Bad Request\r\n\r\n")
 		return
 	}
 
@@ -96,14 +99,61 @@ func handleHTTP(client net.Conn, req *http.Request, allowlist []string) {
 	host := req.URL.Hostname()
 	if !allowed(host, allowlist) {
 		log.Printf("[proxy] %s %s -> REFUSED", req.Method, req.URL)
-		respond(client, http.StatusForbidden, "host not allowed: "+host+"\n")
+		fmt.Fprint(client, "HTTP/1.1 403 Forbidden\r\n\r\n")
 		return
 	}
 
 	log.Printf("[proxy] %s %s -> ALLOWED", req.Method, req.URL)
 
-	// Forwarding comes in the next steps.
-	respond(client, http.StatusNotImplemented, "forwarding plain HTTP is not implemented yet\n")
+	// The request came in proxy form (absolute URL, proxy headers). Make it the
+	// request a server would expect: origin-form, and without anything that was
+	// addressed to this proxy rather than to the destination.
+	req.RequestURI = "" // RoundTrip refuses a request that still has one
+	removeHopByHop(req.Header)
+
+	resp, err := transport.RoundTrip(req)
+	if err != nil {
+		log.Printf("[proxy] forward %s: %v", req.URL, err)
+		fmt.Fprint(client, "HTTP/1.1 502 Bad Gateway\r\n\r\n")
+		return
+	}
+	defer resp.Body.Close()
+	log.Printf("[proxy] %s %s -> upstream said %s", req.Method, req.URL, resp.Status)
+
+	// Hand the response back the same way: without the upstream connection's
+	// own headers, and closing after it since we serve one request per client
+	// connection.
+	removeHopByHop(resp.Header)
+	resp.Close = true
+	if err := resp.Write(client); err != nil {
+		log.Printf("[proxy] write response to client: %v", err)
+	}
+}
+
+// transport sends the forwarded requests. Its Proxy field is left nil on
+// purpose: the default transport would honour HTTP_PROXY, which inside the
+// sandbox points back at this proxy. Compression is off so the body reaches
+// the client byte for byte instead of being decoded here.
+var transport = &http.Transport{DisableCompression: true}
+
+// hopByHop are the headers that describe one connection, not the message, so
+// a proxy must not pass them on (RFC 9110 §7.6.1).
+var hopByHop = []string{
+	"Connection", "Proxy-Connection", "Keep-Alive", "Proxy-Authenticate",
+	"Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade",
+}
+
+// removeHopByHop deletes the hop-by-hop headers from h, including any other
+// header the client listed in its Connection header.
+func removeHopByHop(h http.Header) {
+	for _, v := range h["Connection"] {
+		for name := range strings.SplitSeq(v, ",") {
+			h.Del(strings.TrimSpace(name))
+		}
+	}
+	for _, name := range hopByHop {
+		h.Del(name)
+	}
 }
 
 // handleConnect tunnels a client to target (host:port) if the host is in the
