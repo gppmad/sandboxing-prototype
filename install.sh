@@ -3,6 +3,10 @@
 # then builds sandbox and its three helpers into ~/.local/bin.
 #
 #   sh install.sh
+#
+# Root is only needed to install a missing bwrap or Go, through sudo (you may
+# be asked for your password). If both are already there, everything runs as
+# your own user and nothing is written outside your home directory.
 set -e
 
 if [ "$(uname -s)" != "Linux" ]; then
