@@ -26,8 +26,8 @@ sandbox --allow example.com -- curl https://wikipedia.org   # refused
 # SOCKS5: curl needs to be told, and must use socks5h (not socks5)
 sandbox --allow example.com -- curl --proxy socks5h://localhost:3128 https://example.com
 
-# --allow can be repeated; with none, all network access is refused
-sandbox --allow example.com --allow github.com -- npm install
+# --allow takes several hosts, up to the "--"; with none, all network access is refused
+sandbox --allow example.com github.com -- npm install
 ```
 
 The command reaches the network through HTTP, HTTPS and SOCKS5 (`socks5h://`), all with the same allowlist. Hosts are matched as written, so a name and its IP address are separate entries. A SOCKS5 client must use `socks5h://`, not `socks5://`: the sandbox has no DNS, so the client has to send the host name to the proxy instead of looking it up.

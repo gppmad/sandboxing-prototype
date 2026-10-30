@@ -10,6 +10,10 @@
 //	sandbox --allow example.com -- curl http://example.com      → works
 //	sandbox --allow example.com -- curl https://wikipedia.org   → refused
 //
+// --allow takes any number of hosts, and ends at the "--" before the command:
+//
+//	sandbox --allow example.com github.com -- npm install
+//
 // With no --allow, the program has no network access at all.
 //
 // This is the command-line entry point, the only binary you run yourself. It
@@ -27,6 +31,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -64,12 +69,12 @@ func main() {
 	// flag stops reading at "--" or at the first word that isn't a flag, so
 	// the command's own flags (curl -v ...) are left alone.
 	var allowlist hostList
-	flag.Var(&allowlist, "allow", "a host the command may reach (repeatable)")
+	flag.Var(&allowlist, "allow", "the hosts the command may reach, e.g. --allow example.com github.com")
 	flag.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: sandbox [--allow host]... -- <command> [args...]")
+		fmt.Fprintln(os.Stderr, "usage: sandbox [--allow host...] -- <command> [args...]")
 		flag.PrintDefaults()
 	}
-	flag.Parse()
+	flag.CommandLine.Parse(expandAllow(os.Args[1:]))
 	command := flag.Args()
 	if len(command) == 0 {
 		flag.Usage()
@@ -82,6 +87,36 @@ func main() {
 	}
 
 	os.Exit(outside(allowlist, command))
+}
+
+// expandAllow lets --allow take several hosts. flag reads one value per flag,
+// so every host after --allow becomes an --allow of its own:
+//
+//	--allow a b --allow c --  →  --allow a --allow b --allow c --
+//
+// The list ends at the next word that starts with "-". It is only done when
+// there is a "--", because that is what stops the list from swallowing the
+// command: without it, `--allow a curl` would read curl as a host.
+func expandAllow(args []string) []string {
+	end := slices.Index(args, "--")
+	if end < 0 {
+		return args
+	}
+
+	var out []string
+	listing := false
+	for _, a := range args[:end] {
+		switch {
+		case a == "--allow" || a == "-allow":
+			listing = true
+		case listing && !strings.HasPrefix(a, "-"):
+			out = append(out, "--allow", a)
+		default:
+			listing = false
+			out = append(out, a)
+		}
+	}
+	return append(out, args[end:]...)
 }
 
 // hostList collects every --allow into one list. flag calls Set once per
