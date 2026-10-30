@@ -31,3 +31,11 @@ sandbox --allow example.com --allow github.com -- npm install
 ```
 
 The command reaches the network through HTTP, HTTPS and SOCKS5 (`socks5h://`), all with the same allowlist. Hosts are matched as written, so a name and its IP address are separate entries. A SOCKS5 client must use `socks5h://`, not `socks5://`: the sandbox has no DNS, so the client has to send the host name to the proxy instead of looking it up.
+
+## How it works
+
+<p align="center">
+  <img src="architecture.png" alt="Architecture: the command runs in a Bubblewrap bubble with no network. Its traffic goes through tcp2unix and a Unix socket to unix2tcp and the proxy on the host. The proxy accepts HTTP, HTTPS (CONNECT) and SOCKS5, connects to the Internet if the host is in --allow, and refuses it otherwise." width="720">
+</p>
+
+The command runs in a Bubblewrap bubble with no network, so the only way out is a Unix socket that leads to the proxy on the host. The proxy accepts HTTP, HTTPS (`CONNECT`) and SOCKS5 on one port, and connects only to hosts given with `--allow`.
