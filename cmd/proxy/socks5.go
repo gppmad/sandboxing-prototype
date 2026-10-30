@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"io"
 	"log"
 	"net"
@@ -13,10 +14,11 @@ import (
 )
 
 // The few pieces of SOCKS5 (RFC 1928) this proxy speaks. Only the CONNECT
-// command with a domain name is supported, which is what a client sends when
-// it is told socks5h:// — the name goes to the proxy, which resolves it. A
-// plain socks5:// client resolves the name itself, and the sandbox has no DNS
-// for it to do that.
+// command is supported. The destination may be a domain name, which is what a
+// client sends when it is told socks5h:// — the name goes to the proxy, which
+// resolves it — or an IP address. A plain socks5:// client resolves a name
+// itself, and the sandbox has no DNS for it to do that, so it has nothing to
+// send.
 const (
 	socksVersion = 0x05
 
@@ -25,7 +27,9 @@ const (
 
 	cmdConnect = 0x01
 
+	addrIPv4   = 0x01
 	addrDomain = 0x03
+	addrIPv6   = 0x04
 
 	replySucceeded           = 0x00
 	replyNotAllowed          = 0x02 // "connection not allowed by ruleset"
@@ -68,26 +72,17 @@ func handleSocks5(client net.Conn, r *bufio.Reader, allowlist []string) {
 		socksReply(client, replyCommandNotSupported)
 		return
 	}
-	if req[3] != addrDomain {
-		log.Printf("[socks5] address type %d -> REFUSED (only domain names)", req[3])
+	host, port, err := readSocksAddr(r, req[3])
+	if errors.Is(err, errAddrType) {
+		log.Printf("[socks5] address type %d -> REFUSED", req[3])
 		socksReply(client, replyAddrNotSupported)
 		return
 	}
-
-	// A domain address is one length byte, the name, then a two-byte port.
-	size := make([]byte, 1)
-	if _, err := io.ReadFull(r, size); err != nil {
+	if err != nil {
 		log.Printf("[socks5] read address: %v", err)
 		return
 	}
-	rest := make([]byte, int(size[0])+2)
-	if _, err := io.ReadFull(r, rest); err != nil {
-		log.Printf("[socks5] read address: %v", err)
-		return
-	}
-	host := string(rest[:size[0]])
-	port := binary.BigEndian.Uint16(rest[size[0]:])
-	target := net.JoinHostPort(host, strconv.Itoa(int(port)))
+	target := net.JoinHostPort(host, strconv.Itoa(port))
 
 	// Same rule as everywhere else, and before anything is dialed.
 	if !allowed(host, allowlist) {
@@ -120,4 +115,42 @@ func handleSocks5(client net.Conn, r *bufio.Reader, allowlist []string) {
 func socksReply(client net.Conn, code byte) bool {
 	_, err := client.Write([]byte{socksVersion, code, 0x00, 0x01, 0, 0, 0, 0, 0, 0})
 	return err == nil
+}
+
+var errAddrType = errors.New("unknown address type")
+
+// readSocksAddr reads the destination of a request: an address of the given
+// type, then a two-byte port. The address comes back as text, the form the
+// allowlist is written in: a domain name as sent, an IP in its usual notation.
+func readSocksAddr(r io.Reader, atyp byte) (host string, port int, err error) {
+	var addr []byte
+	switch atyp {
+	case addrIPv4:
+		addr = make([]byte, 4)
+	case addrIPv6:
+		addr = make([]byte, 16)
+	case addrDomain:
+		// A domain is one length byte, then the name.
+		size := make([]byte, 1)
+		if _, err := io.ReadFull(r, size); err != nil {
+			return "", 0, err
+		}
+		addr = make([]byte, size[0])
+	default:
+		return "", 0, errAddrType
+	}
+	if _, err := io.ReadFull(r, addr); err != nil {
+		return "", 0, err
+	}
+
+	portBytes := make([]byte, 2)
+	if _, err := io.ReadFull(r, portBytes); err != nil {
+		return "", 0, err
+	}
+	port = int(binary.BigEndian.Uint16(portBytes))
+
+	if atyp == addrDomain {
+		return string(addr), port, nil
+	}
+	return net.IP(addr).String(), port, nil
 }

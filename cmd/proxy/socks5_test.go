@@ -108,21 +108,84 @@ func TestSocks5RefusesOtherCommands(t *testing.T) {
 	}
 }
 
-// IP addresses are not supported yet: IPv4 (1) and IPv6 (4).
-func TestSocks5RefusesIPAddresses(t *testing.T) {
-	for _, tc := range []struct {
-		atyp byte
-		addr []byte
-	}{
-		{0x01, []byte{127, 0, 0, 1, 0x01, 0xBB}},
-		{0x04, append(make([]byte, 16), 0x01, 0xBB)},
+// echoBackend listens on network/addr, upper-cases the first four bytes it
+// receives and sends them back. It returns the listener.
+func echoBackend(t *testing.T, network, addr string) net.Listener {
+	t.Helper()
+	ln, err := net.Listen(network, addr)
+	if err != nil {
+		t.Skipf("cannot listen on %s: %v", addr, err)
+	}
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		buf := make([]byte, 4)
+		io.ReadFull(c, buf)
+		c.Write(bytes.ToUpper(buf))
+	}()
+	return ln
+}
+
+// ipAddr encodes ip:port the way a client sends an IPv4 or IPv6 destination:
+// the raw address bytes, then a two-byte port.
+func ipAddr(ip net.IP, port int) (atyp byte, addr []byte) {
+	if v4 := ip.To4(); v4 != nil {
+		return 0x01, binary.BigEndian.AppendUint16(v4, uint16(port))
+	}
+	return 0x04, binary.BigEndian.AppendUint16(ip.To16(), uint16(port))
+}
+
+// The allowlist holds the IP as text, the same as it does for HTTP and HTTPS.
+func TestSocks5RelaysToAllowedIP(t *testing.T) {
+	for _, tc := range []struct{ name, network, host string }{
+		{"IPv4", "tcp4", "127.0.0.1"},
+		{"IPv6", "tcp6", "::1"},
 	} {
-		c := serve([]string{"127.0.0.1"})
+		t.Run(tc.name, func(t *testing.T) {
+			ln := echoBackend(t, tc.network, net.JoinHostPort(tc.host, "0"))
+			defer ln.Close()
+
+			c := serve([]string{tc.host})
+			defer c.Close()
+			socksHello(t, c)
+			atyp, addr := ipAddr(net.ParseIP(tc.host), ln.Addr().(*net.TCPAddr).Port)
+			if code := socksRequest(t, c, 0x01, atyp, addr); code != 0x00 {
+				t.Fatalf("reply code = %d, want 0 (succeeded)", code)
+			}
+
+			c.Write([]byte("ping"))
+			got := make([]byte, 4)
+			if _, err := io.ReadFull(c, got); err != nil || string(got) != "PING" {
+				t.Errorf("through the tunnel got %q, %v; want PING", got, err)
+			}
+		})
+	}
+}
+
+func TestSocks5RefusesIPNotInAllowlist(t *testing.T) {
+	for _, ip := range []string{"127.0.0.1", "::1"} {
+		// example.com being allowed says nothing about an IP: the policy
+		// compares the text it is given, it does not resolve names.
+		c := serve([]string{"example.com"})
 		socksHello(t, c)
-		if code := socksRequest(t, c, 0x01, tc.atyp, tc.addr); code != 0x08 {
-			t.Errorf("address type %d: reply code = %d, want 8 (address type not supported)", tc.atyp, code)
+		atyp, addr := ipAddr(net.ParseIP(ip), 443)
+		if code := socksRequest(t, c, 0x01, atyp, addr); code != 0x02 {
+			t.Errorf("%s: reply code = %d, want 2 (not allowed)", ip, code)
 		}
 		c.Close()
+	}
+}
+
+func TestSocks5RefusesUnknownAddressType(t *testing.T) {
+	c := serve([]string{"example.com"})
+	defer c.Close()
+	socksHello(t, c)
+
+	if code := socksRequest(t, c, 0x01, 0x02, nil); code != 0x08 {
+		t.Errorf("reply code = %d, want 8 (address type not supported)", code)
 	}
 }
 
