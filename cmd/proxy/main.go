@@ -1,12 +1,14 @@
-// Command proxy is a filtering HTTP proxy. It serves two kinds of request:
+// Command proxy is a filtering proxy. One port serves three kinds of client:
 //
 //   - CONNECT (HTTPS): it reads the destination the client names in cleartext,
 //     dials it, and then shuffles encrypted bytes between the two without ever
 //     taking part in the TLS handshake.
 //   - plain HTTP (`GET http://host/path`): it reads the request, forwards it to
 //     the host in the URL, and relays the response back.
+//   - SOCKS5 (`socks5h://`): it reads the host name the client sends, dials it,
+//     and relays bytes like a CONNECT tunnel.
 //
-// Both go through the same allowlist, checked before anything is dialed.
+// All of them go through the same allowlist, checked before anything is dialed.
 //
 // Usage: proxy <listen addr> [allowed host]...
 //
@@ -66,6 +68,19 @@ func handleConn(client net.Conn, allowlist []string) {
 	// the socket, so anything the client sent after the headers is already
 	// sitting in this buffer, not in the connection.
 	r := bufio.NewReader(client)
+
+	// A SOCKS5 client opens with the version byte 0x05. No HTTP request can
+	// start with it, so the first byte tells the two protocols apart and one
+	// port serves both. Peek leaves the byte in r for whoever reads next.
+	first, err := r.Peek(1)
+	if err != nil {
+		log.Printf("[proxy] read first byte: %v", err)
+		return
+	}
+	if first[0] == socksVersion {
+		handleSocks5(client, r, allowlist)
+		return
+	}
 
 	// ReadRequest consumes the request line and every header up to the blank
 	// line, leaving r at the first byte of whatever follows — for CONNECT,
