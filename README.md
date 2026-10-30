@@ -23,6 +23,9 @@ sandbox --allow example.com -- curl https://example.com     # works
 sandbox --allow example.com -- curl http://example.com      # works
 sandbox --allow example.com -- curl https://wikipedia.org   # refused
 
+# SOCKS5: curl needs to be told, and must use socks5h (not socks5)
+sandbox --allow example.com -- curl --proxy socks5h://localhost:3128 https://example.com
+
 # --allow can be repeated; with none, all network access is refused
 sandbox --allow example.com --allow github.com -- npm install
 ```
