@@ -8,7 +8,7 @@ The purpose of this project is to learn how to work with OS primitives and netwo
 
 ## Install
 
-Linux only. `install.sh` installs Go and Bubblewrap if they are missing, then builds `sandbox`. Only the installs need `sudo` (it may ask for your password); the build runs as your user and writes to `~/.local/bin`:
+Linux only. Installing packages needs `sudo`, so `install.sh` may ask for your password if Go or Bubblewrap is missing. Once both are there, it builds `sandbox` as your user:
 
 ```sh
 # Downloads install.sh and runs it in one go
