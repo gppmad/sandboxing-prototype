@@ -30,7 +30,7 @@ sandbox --allow example.com -- curl --proxy socks5h://localhost:3128 https://exa
 sandbox --allow example.com github.com -- npm install
 ```
 
-The command reaches the network through HTTP, HTTPS and SOCKS5 (`socks5h://`), all with the same allowlist. Hosts are matched as written, so a name and its IP address are separate entries. A SOCKS5 client must use `socks5h://`, not `socks5://`: the sandbox has no DNS, so the client has to send the host name to the proxy instead of looking it up.
+Two things to know. Hosts are matched as written, so a name and its IP address are separate entries. And a SOCKS5 client must use `socks5h://`, not `socks5://`: the sandbox has no DNS, so the client has to send the host name to the proxy instead of looking it up.
 
 ## How it works
 
