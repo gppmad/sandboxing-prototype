@@ -20,8 +20,11 @@ curl -fsSL https://raw.githubusercontent.com/gppmad/sandboxing-prototype/main/in
 ```sh
 # Only the hosts given with --allow can be reached
 sandbox --allow example.com -- curl https://example.com     # works
+sandbox --allow example.com -- curl http://example.com      # works
 sandbox --allow example.com -- curl https://wikipedia.org   # refused
 
 # --allow can be repeated; with none, all network access is refused
 sandbox --allow example.com --allow github.com -- npm install
 ```
+
+The command reaches the network through HTTP, HTTPS and SOCKS5 (`socks5h://`), all with the same allowlist. Hosts are matched as written, so a name and its IP address are separate entries. A SOCKS5 client must use `socks5h://`, not `socks5://`: the sandbox has no DNS, so the client has to send the host name to the proxy instead of looking it up.

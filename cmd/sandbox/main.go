@@ -154,16 +154,20 @@ func inside(args []string) int {
 	defer tcp2unix.Process.Kill()
 	waitFor("tcp", bridgeAddr)
 
-	// Run the command as a child rather than exec'ing it: exec would replace
-	// this process, and tcp2unix would lose the parent that cleans it up.
-	// Both schemes go through the proxy. curl only reads the lowercase
-	// http_proxy, so that one is set as well.
+	// Both HTTP schemes go through the proxy. curl only reads the lowercase
+	// http_proxy, so that one is set as well. ALL_PROXY is for tools that speak
+	// SOCKS5: socks5h, with the h, so they send the host name to the proxy
+	// instead of resolving it — the sandbox has no DNS.
 	proxyURL := "http://" + bridgeAddr
 	env := append(os.Environ(),
 		"HTTPS_PROXY="+proxyURL,
 		"HTTP_PROXY="+proxyURL,
 		"http_proxy="+proxyURL,
+		"ALL_PROXY=socks5h://"+bridgeAddr,
 	)
+
+	// Run the command as a child rather than exec'ing it: exec would replace
+	// this process, and tcp2unix would lose the parent that cleans it up.
 	return run(command[0], command[1:], env)
 }
 
