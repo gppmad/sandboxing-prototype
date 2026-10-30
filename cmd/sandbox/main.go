@@ -1,10 +1,20 @@
 //go:build linux
 
-// Command sandbox runs a command with no network, except through the
-// filtering proxy, which lets it reach only the hosts given with --allow.
+// Command sandbox runs a program that can only talk to the internet hosts you
+// name. Use it to run something you don't fully trust, such as a script or a
+// coding agent, without letting it send data anywhere else.
+//
+// Everything else is blocked, for both HTTPS and plain HTTP:
 //
 //	sandbox --allow example.com -- curl https://example.com     → works
+//	sandbox --allow example.com -- curl http://example.com      → works
 //	sandbox --allow example.com -- curl https://wikipedia.org   → refused
+//
+// With no --allow, the program has no network access at all.
+//
+// This is the command-line entry point, the only binary you run yourself. It
+// starts the helper programs in the other cmd/ directories (proxy, unix2tcp,
+// tcp2unix) and runs your command inside Bubblewrap.
 package main
 
 import (
